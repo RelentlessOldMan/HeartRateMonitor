@@ -16,7 +16,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -32,7 +32,7 @@ jobs:
           "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
           if ($exists) { "v$v is already released; nothing to do." }
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         if: steps.version.outputs.exists == 'false'
         with:
           dotnet-version: 10.0.x
@@ -57,7 +57,7 @@ jobs:
           **Download:** ``HeartRateMonitor.exe`` below and run it. It's standalone; no .NET install needed.
           (Grab the ``.zip`` instead if your browser or antivirus balks at downloading an exe.)
 
-          Windows SmartScreen may warn because the exe isn't code-signed: click **More info → Run anyway**.
+          Windows SmartScreen may warn because the exe isn't code-signed: click **More info â†’ Run anyway**.
           "@
           gh release create "v$v" out/HeartRateMonitor.exe $zip `
             --title "HeartRateMonitor v$v" --notes $notes --generate-notes --target "${{ github.sha }}"
