@@ -57,7 +57,7 @@ jobs:
           **Download:** ``HeartRateMonitor.exe`` below and run it. It's standalone; no .NET install needed.
           (Grab the ``.zip`` instead if your browser or antivirus balks at downloading an exe.)
 
-          Windows SmartScreen may warn because the exe isn't code-signed: click **More info â†’ Run anyway**.
+          Windows SmartScreen may warn because the exe isn't code-signed: click **More info → Run anyway**.
           "@
           gh release create "v$v" out/HeartRateMonitor.exe $zip `
             --title "HeartRateMonitor v$v" --notes $notes --generate-notes --target "${{ github.sha }}"
