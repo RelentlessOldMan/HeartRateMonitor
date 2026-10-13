@@ -1,0 +1,213 @@
+using System.Collections.Specialized;
+using System.Globalization;
+using System.Windows;
+using System.Windows.Media;
+using HeartRateMonitor.Models;
+
+namespace HeartRateMonitor.Controls;
+
+/// <summary>Line graph of heart rate over time, colored by zone, with optional zone bands behind it.</summary>
+public sealed class HeartRateGraph : FrameworkElement
+{
+    /// <summary>Samples further apart than this are drawn as a gap (e.g. strap dropped out).</summary>
+    private static readonly TimeSpan GapThreshold = TimeSpan.FromSeconds(5);
+
+    public static readonly DependencyProperty SamplesProperty = DependencyProperty.Register(
+        nameof(Samples), typeof(IList<HeartRateSample>), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnCollectionChanged));
+
+    public static readonly DependencyProperty ZonesProperty = DependencyProperty.Register(
+        nameof(Zones), typeof(IEnumerable<HeartRateZone>), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnCollectionChanged));
+
+    public static readonly DependencyProperty WindowMinutesProperty = DependencyProperty.Register(
+        nameof(WindowMinutes), typeof(double), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty DefaultColorProperty = DependencyProperty.Register(
+        nameof(DefaultColor), typeof(string), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata("#FFFFFF", FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty UseZoneColorsProperty = DependencyProperty.Register(
+        nameof(UseZoneColors), typeof(bool), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ShowZoneBandsProperty = DependencyProperty.Register(
+        nameof(ShowZoneBands), typeof(bool), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty ShowLabelsProperty = DependencyProperty.Register(
+        nameof(ShowLabels), typeof(bool), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public static readonly DependencyProperty LineThicknessProperty = DependencyProperty.Register(
+        nameof(LineThickness), typeof(double), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(2.0, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public IList<HeartRateSample>? Samples { get => (IList<HeartRateSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
+    public IEnumerable<HeartRateZone>? Zones { get => (IEnumerable<HeartRateZone>?)GetValue(ZonesProperty); set => SetValue(ZonesProperty, value); }
+    /// <summary>Show only the last N minutes, scrolling. 0 = the whole session.</summary>
+    public double WindowMinutes { get => (double)GetValue(WindowMinutesProperty); set => SetValue(WindowMinutesProperty, value); }
+    /// <summary>Line color when not using zone colors, or below the lowest zone.</summary>
+    public string DefaultColor { get => (string)GetValue(DefaultColorProperty); set => SetValue(DefaultColorProperty, value); }
+    public bool UseZoneColors { get => (bool)GetValue(UseZoneColorsProperty); set => SetValue(UseZoneColorsProperty, value); }
+    public bool ShowZoneBands { get => (bool)GetValue(ShowZoneBandsProperty); set => SetValue(ShowZoneBandsProperty, value); }
+    public bool ShowLabels { get => (bool)GetValue(ShowLabelsProperty); set => SetValue(ShowLabelsProperty, value); }
+    public double LineThickness { get => (double)GetValue(LineThicknessProperty); set => SetValue(LineThicknessProperty, value); }
+
+    public HeartRateGraph()
+    {
+        ClipToBounds = true;
+    }
+
+    private static void OnCollectionChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var graph = (HeartRateGraph)d;
+        if (e.OldValue is INotifyCollectionChanged oldCollection)
+            oldCollection.CollectionChanged -= graph.OnItemsChanged;
+        if (e.NewValue is INotifyCollectionChanged newCollection)
+            newCollection.CollectionChanged += graph.OnItemsChanged;
+    }
+
+    private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => InvalidateVisual();
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double width = ActualWidth, height = ActualHeight;
+        var samples = Samples;
+        if (width < 2 || height < 2 || samples is null || samples.Count == 0)
+            return;
+
+        var zones = (Zones ?? []).OrderBy(z => z.MinBpm).ToList();
+
+        // Time axis.
+        DateTime end = samples[^1].Time;
+        DateTime start;
+        if (WindowMinutes > 0)
+        {
+            start = end - TimeSpan.FromMinutes(WindowMinutes);
+        }
+        else
+        {
+            start = samples[0].Time;
+            if (end - start < TimeSpan.FromMinutes(1))
+                end = start + TimeSpan.FromMinutes(1);
+        }
+        double spanTicks = (end - start).Ticks;
+
+        int first = FirstIndexAtOrAfter(samples, start);
+        if (first >= samples.Count)
+            return;
+
+        // BPM axis: fit the visible data with some headroom, at least 40 bpm tall.
+        int min = int.MaxValue, max = int.MinValue;
+        for (int i = first; i < samples.Count; i++)
+        {
+            min = Math.Min(min, samples[i].Bpm);
+            max = Math.Max(max, samples[i].Bpm);
+        }
+        double lo = min - 10, hi = max + 10;
+        if (hi - lo < 40)
+        {
+            double mid = (hi + lo) / 2;
+            lo = mid - 20;
+            hi = mid + 20;
+        }
+
+        double X(DateTime t) => (t - start).Ticks / spanTicks * width;
+        double Y(double bpm) => height - (bpm - lo) / (hi - lo) * height;
+
+        if (ShowZoneBands)
+        {
+            for (int i = 0; i < zones.Count; i++)
+            {
+                double bandLo = Math.Max(zones[i].MinBpm, lo);
+                double bandHi = Math.Min(i + 1 < zones.Count ? zones[i + 1].MinBpm : hi, hi);
+                if (bandHi <= bandLo)
+                    continue;
+                var brush = BrushCache.Get(zones[i].Color, alpha: 0x38);
+                dc.DrawRectangle(brush, null, new Rect(0, Y(bandHi), width, Y(bandLo) - Y(bandHi)));
+            }
+        }
+
+        // Draw runs of same-colored, contiguous samples as one polyline each.
+        string ColorFor(int bpm) =>
+            UseZoneColors ? HeartRateZone.Find(zones, bpm)?.Color ?? DefaultColor : DefaultColor;
+
+        var run = new List<Point>();
+        string? runColor = null;
+        void Flush()
+        {
+            if (run.Count >= 2 && runColor is not null)
+                DrawPolyline(dc, run, BrushCache.GetPen(runColor, LineThickness));
+            run.Clear();
+        }
+
+        double lastX = double.NegativeInfinity;
+        for (int i = first; i < samples.Count; i++)
+        {
+            var sample = samples[i];
+            var point = new Point(X(sample.Time), Y(sample.Bpm));
+            bool gap = i > first && sample.Time - samples[i - 1].Time > GapThreshold;
+            string color = ColorFor(sample.Bpm);
+
+            if (gap)
+            {
+                Flush();
+                runColor = color;
+            }
+            else if (color != runColor)
+            {
+                // Start the new color at the previous point so the line stays continuous.
+                Point? joint = run.Count > 0 ? run[^1] : null;
+                Flush();
+                if (joint is { } j)
+                    run.Add(j);
+                runColor = color;
+            }
+            else if (point.X - lastX < 0.75 && i != samples.Count - 1)
+            {
+                continue; // More samples than pixels: skip ones that would land on the same column.
+            }
+
+            run.Add(point);
+            lastX = point.X;
+        }
+        Flush();
+
+        if (ShowLabels)
+        {
+            var labelBrush = BrushCache.Get("#888888");
+            double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            FormattedText Label(string s) => new(s, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                new Typeface("Segoe UI"), 11, labelBrush, dpi);
+            dc.DrawText(Label(((int)hi).ToString()), new Point(4, 2));
+            var bottom = Label(((int)lo).ToString());
+            dc.DrawText(bottom, new Point(4, height - bottom.Height - 2));
+        }
+    }
+
+    private static int FirstIndexAtOrAfter(IList<HeartRateSample> samples, DateTime time)
+    {
+        int lo = 0, hi = samples.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (samples[mid].Time < time) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    private static void DrawPolyline(DrawingContext dc, List<Point> points, Pen pen)
+    {
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            ctx.BeginFigure(points[0], isFilled: false, isClosed: false);
+            ctx.PolyLineTo(points.Skip(1).ToList(), isStroked: true, isSmoothJoin: true);
+        }
+        geometry.Freeze();
+        dc.DrawGeometry(null, pen, geometry);
+    }
+}

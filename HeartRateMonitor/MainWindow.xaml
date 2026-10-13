@@ -1,0 +1,280 @@
+<Window x:Class="HeartRateMonitor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:HeartRateMonitor.Controls"
+        Title="Heart Rate Monitor" Width="640" Height="680"
+        ResizeMode="CanMinimize" Icon="Assets/app.ico"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <c:HexToBrushConverter x:Key="HexToBrush" />
+        <c:EnumToBoolConverter x:Key="EnumToBool" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,0,0,10" />
+            <Setter Property="Padding" Value="8" />
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,3" />
+        </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,3,16,3" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+        <!-- Clickable color swatch; the Tag holds the "#RRGGBB" to show. -->
+        <Style x:Key="Swatch" TargetType="Button">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTip" Value="Click to choose a color" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource HexToBrush}}"
+                                BorderBrush="#888" BorderThickness="1" CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="10">
+        <!-- Connection bar -->
+        <Border DockPanel.Dock="Top" Background="#FFF4DC" BorderBrush="#E0B000" BorderThickness="1" CornerRadius="3"
+                Padding="8,4" Margin="0,0,0,8"
+                Visibility="{Binding IsDummy, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="Dummy data mode: showing fake heart rate, not talking to a strap." />
+        </Border>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <UniformGrid DockPanel.Dock="Right" Rows="1" VerticalAlignment="Center">
+                <Button Content="Reconnect" Click="Reconnect_Click" ToolTip="Drop the connection and connect again" />
+                <Button Content="Forget strap" Click="Forget_Click" Margin="0"
+                        ToolTip="Forget the remembered strap and connect to the first one found" />
+            </UniformGrid>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock>
+                    <Run Text="Strap:" FontWeight="SemiBold" />
+                    <Run Text="{Binding Settings.DeviceName, TargetNullValue='(none yet)', Mode=OneWay}" />
+                    <Run Text="   Battery:" FontWeight="SemiBold" />
+                    <Run Text="{Binding BatteryText, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock Foreground="#555">
+                    <Run Text="{Binding State, Mode=OneWay}" />
+                    <Run Text="–" />
+                    <Run Text="{Binding StatusText, Mode=OneWay}" />
+                </TextBlock>
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl x:Name="Tabs">
+            <!-- ================= Live ================= -->
+            <TabItem Header="Live">
+                <DockPanel Margin="10">
+                    <DockPanel DockPanel.Dock="Top">
+                        <TextBlock DockPanel.Dock="Left" Text="{Binding DisplayText}" FontSize="64" FontWeight="Bold"
+                                   MinWidth="130" Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}" />
+                        <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
+                            <TextBlock Text="{Binding ZoneName}" FontSize="18" />
+                            <TextBlock Text="{Binding StatsText}" Foreground="#555" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                        <UniformGrid DockPanel.Dock="Left" Rows="1">
+                            <Button x:Name="RecordButton" Content="● Start recording" Click="Record_Click" />
+                            <Button Content="Open folder" Click="OpenFolder_Click" />
+                            <Button Content="Reset graph" Click="ResetSession_Click" />
+                        </UniformGrid>
+                        <TextBlock Text="{Binding RecordingText}" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+
+                    <Border BorderBrush="#CCC" BorderThickness="1" Background="#1E1E1E" Margin="0,8,0,0">
+                        <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}"
+                                          ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF" />
+                    </Border>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ================= Overlay ================= -->
+            <TabItem Header="Overlay">
+                    <StackPanel Margin="10">
+                        <GroupBox Header="Window">
+                            <StackPanel>
+                                <CheckBox Content="Show overlay" IsChecked="{Binding Settings.OverlayVisible}" />
+                                <CheckBox Content="Lock overlay (click-through, so it never gets in the way of the game)"
+                                          IsChecked="{Binding Settings.OverlayLocked}" />
+                                <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,4,0,8"
+                                           Text="Unlocked: drag the overlay to move it, drag the corner to resize it, right-click it for options." />
+                                <Button Content="Reset position and size" HorizontalAlignment="Left" Click="ResetOverlay_Click" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Number">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="Color" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                                    <RadioButton Content="By heart rate zone"
+                                                 IsChecked="{Binding Settings.ColorMode, Converter={StaticResource EnumToBool}, ConverterParameter=Zone}" />
+                                    <RadioButton Content="Always this color:"
+                                                 IsChecked="{Binding Settings.ColorMode, Converter={StaticResource EnumToBool}, ConverterParameter=Fixed}" />
+                                    <Button Style="{StaticResource Swatch}" Tag="{Binding Settings.FixedColor}" Click="FixedColor_Click" />
+                                </StackPanel>
+
+                                <TextBlock Grid.Row="1" Text="Font" VerticalAlignment="Center" />
+                                <ComboBox Grid.Row="1" Grid.Column="1" x:Name="FontCombo" Margin="0,3" Width="240" HorizontalAlignment="Left"
+                                          SelectedValuePath="Source" SelectedValue="{Binding Settings.FontFamily}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Source}" FontFamily="{Binding}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                    <ComboBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel />
+                                        </ItemsPanelTemplate>
+                                    </ComboBox.ItemsPanel>
+                                </ComboBox>
+
+                                <TextBlock Grid.Row="2" Text="Outline" VerticalAlignment="Center" />
+                                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                                    <CheckBox Content="Glow around text" IsChecked="{Binding Settings.ShowOutline}" Margin="0,0,10,0" VerticalAlignment="Center" />
+                                    <Button Style="{StaticResource Swatch}" Tag="{Binding Settings.OutlineColor}" Click="OutlineColor_Click" />
+                                </StackPanel>
+
+                                <TextBlock Grid.Row="3" Text="Extras" VerticalAlignment="Top" Margin="0,3" />
+                                <StackPanel Grid.Row="3" Grid.Column="1">
+                                    <CheckBox Content="Beating heart" IsChecked="{Binding Settings.ShowHeart}" />
+                                    <CheckBox Content="Zone name under the number" IsChecked="{Binding Settings.ShowZoneName}" />
+                                </StackPanel>
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="Background">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource Swatch}" Tag="{Binding Settings.BackgroundColor}" Click="BackgroundColor_Click" />
+                                <TextBlock Text="Opacity" VerticalAlignment="Center" Margin="10,0,6,0" />
+                                <Slider Width="200" Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                        Value="{Binding Settings.BackgroundOpacity}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Settings.BackgroundOpacity, StringFormat={}{0:P0}}" VerticalAlignment="Center" Margin="6,0" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Graph">
+                            <StackPanel>
+                                <CheckBox Content="Show live graph under the number" IsChecked="{Binding Settings.ShowOverlayGraph}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <TextBlock Text="Show the last" VerticalAlignment="Center" />
+                                    <Slider Width="200" Minimum="1" Maximum="30" IsSnapToTickEnabled="True" TickFrequency="1"
+                                            Value="{Binding Settings.OverlayGraphMinutes}" VerticalAlignment="Center" Margin="6,0" />
+                                    <TextBlock Text="{Binding Settings.OverlayGraphMinutes, StringFormat={}{0:0} min}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+            </TabItem>
+
+            <!-- ================= Zones ================= -->
+            <TabItem Header="Zones">
+                <DockPanel Margin="10">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Max heart rate" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBox Width="50" Text="{Binding Settings.MaxHeartRate, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" />
+                        <Button Content="Recalculate zones" Margin="8,0,6,0" Click="RecalculateZones_Click"
+                                ToolTip="Reset zones to 50/60/70/80/90% of max heart rate" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" Foreground="#555" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Each zone runs from its minimum up to the next zone's minimum. Below the lowest zone, the number uses the fixed color from the Overlay tab. A common max heart rate estimate is 220 minus your age." />
+                    <UniformGrid DockPanel.Dock="Bottom" Rows="1" HorizontalAlignment="Left" Margin="0,8,0,0">
+                        <Button Content="Add zone" Click="AddZone_Click" />
+                        <Button Content="Remove selected" Click="RemoveZone_Click" />
+                    </UniformGrid>
+                    <DataGrid x:Name="ZonesGrid" ItemsSource="{Binding Settings.Zones}" AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                              HeadersVisibility="Column" SelectionMode="Single" RowHeight="32"
+                              Background="White" BorderBrush="#CCCCCC" BorderThickness="1"
+                              GridLinesVisibility="All" HorizontalGridLinesBrush="#E0E0E0" VerticalGridLinesBrush="#E0E0E0">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Padding" Value="6,5" />
+                                <Setter Property="Background" Value="#F5F5F5" />
+                                <Setter Property="BorderBrush" Value="#E0E0E0" />
+                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.CellStyle>
+                            <!-- Grid lines already separate cells; a cell border would double them up. -->
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="Padding" Value="4,0" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="DataGridCell">
+                                            <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter VerticalAlignment="Center" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#D8E8FA" />
+                                        <Setter Property="Foreground" Value="Black" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.CellStyle>
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Color" Width="70">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource Swatch}" Tag="{Binding Color}" Click="ZoneColor_Click" Margin="6,0" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Name" Width="*" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                            <DataGridTextColumn Header="From BPM" Width="90" Binding="{Binding MinBpm, UpdateSourceTrigger=PropertyChanged}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ================= Settings ================= -->
+            <TabItem Header="Settings">
+                <StackPanel Margin="10">
+                    <GroupBox Header="Strap">
+                        <StackPanel>
+                            <CheckBox Content="Connect automatically on startup" IsChecked="{Binding Settings.AutoConnect}" />
+                            <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="The first heart rate strap found gets remembered and reconnected from then on. Disconnect it from your phone or watch first, since most straps only talk to one device at a time." />
+                        </StackPanel>
+                    </GroupBox>
+                    <GroupBox Header="Recording">
+                        <StackPanel>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="Browse…" Margin="6,0,0,0" Click="BrowseFolder_Click" />
+                                <TextBox Text="{Binding Settings.RecordingFolder}" VerticalContentAlignment="Center" />
+                            </DockPanel>
+                            <CheckBox Content="Also save a .tcx file (for Strava, Garmin Connect, etc.)" IsChecked="{Binding Settings.WriteTcx}" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </GroupBox>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

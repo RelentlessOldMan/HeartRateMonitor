@@ -1,0 +1,63 @@
+name: Release
+
+# Bump <Version> in HeartRateMonitor/HeartRateMonitor.csproj and push to main:
+# this builds a standalone exe (no .NET install needed) and publishes it as release v<Version>.
+# Pushes that don't change the version are skipped because that release's tag already exists.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $v = ([xml](Get-Content HeartRateMonitor/HeartRateMonitor.csproj)).Project.PropertyGroup.Version |
+            Where-Object { $_ } | Select-Object -First 1
+          if (-not $v) { throw "No <Version> in HeartRateMonitor.csproj" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          $exists = [bool](git tag --list "v$v")
+          "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($exists) { "v$v is already released; nothing to do." }
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.version.outputs.exists == 'false'
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build standalone exe
+        if: steps.version.outputs.exists == 'false'
+        run: >
+          dotnet publish HeartRateMonitor/HeartRateMonitor.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -o out
+
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $zip = "out/HeartRateMonitor-v$v-win-x64.zip"
+          Compress-Archive out/HeartRateMonitor.exe $zip
+          $notes = @"
+          **Download:** ``HeartRateMonitor.exe`` below and run it. It's standalone; no .NET install needed.
+          (Grab the ``.zip`` instead if your browser or antivirus balks at downloading an exe.)
+
+          Windows SmartScreen may warn because the exe isn't code-signed: click **More info → Run anyway**.
+          "@
+          gh release create "v$v" out/HeartRateMonitor.exe $zip `
+            --title "HeartRateMonitor v$v" --notes $notes --generate-notes --target "${{ github.sha }}"

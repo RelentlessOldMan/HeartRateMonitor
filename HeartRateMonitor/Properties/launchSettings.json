@@ -1,0 +1,11 @@
+﻿{
+  "profiles": {
+    "HeartRateMonitor": {
+      "commandName": "Project"
+    },
+    "HeartRateMonitor (dummy data)": {
+      "commandName": "Project",
+      "commandLineArgs": "--dummy"
+    }
+  }
+}

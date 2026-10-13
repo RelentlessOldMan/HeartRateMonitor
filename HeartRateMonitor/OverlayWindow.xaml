@@ -1,0 +1,80 @@
+<Window x:Class="HeartRateMonitor.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:HeartRateMonitor.Controls"
+        Title="Heart Rate Overlay"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        MinWidth="60" MinHeight="40"
+        Left="{Binding Settings.OverlayLeft, Mode=TwoWay}"
+        Top="{Binding Settings.OverlayTop, Mode=TwoWay}"
+        Width="{Binding Settings.OverlayWidth, Mode=TwoWay}"
+        Height="{Binding Settings.OverlayHeight, Mode=TwoWay}">
+    <Window.Resources>
+        <c:HexToBrushConverter x:Key="HexToBrush" />
+        <c:BoolToStarConverter x:Key="BoolToStar" />
+        <c:EnumToBoolConverter x:Key="EnumToBool" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
+
+    <Window.ContextMenu>
+        <ContextMenu>
+            <MenuItem Header="Lock (click-through)" Click="Lock_Click" />
+            <MenuItem Header="Show graph" IsCheckable="True" IsChecked="{Binding Settings.ShowOverlayGraph}" />
+            <MenuItem Header="Show heart" IsCheckable="True" IsChecked="{Binding Settings.ShowHeart}" />
+            <MenuItem Header="Show zone name" IsCheckable="True" IsChecked="{Binding Settings.ShowZoneName}" />
+            <Separator />
+            <MenuItem Header="Settings…" Click="Settings_Click" />
+            <MenuItem Header="Hide overlay" Click="Hide_Click" />
+        </ContextMenu>
+    </Window.ContextMenu>
+
+    <!-- Near-invisible background while unlocked so the whole area can be grabbed; fully transparent when locked. -->
+    <Grid x:Name="Root" Background="#01000000">
+        <Border Background="{Binding Settings.BackgroundColor, Converter={StaticResource HexToBrush}}"
+                Opacity="{Binding Settings.BackgroundOpacity}" CornerRadius="8" />
+        <Border x:Name="HoverFrame" BorderBrush="#A0FFFFFF" BorderThickness="1" CornerRadius="8" Visibility="Hidden" />
+
+        <Grid Margin="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="{Binding Settings.ShowOverlayGraph, Converter={StaticResource BoolToStar}, ConverterParameter=0.6}" />
+            </Grid.RowDefinitions>
+
+            <!-- The Viewbox scales everything with the window: resize the overlay to resize the number. -->
+            <Viewbox Stretch="Uniform">
+                <StackPanel x:Name="TextPanel">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <TextBlock x:Name="Heart" Text="&#x2665;" FontFamily="Segoe UI Symbol" FontSize="64"
+                                   VerticalAlignment="Center" Margin="0,8,10,0" RenderTransformOrigin="0.5,0.5"
+                                   Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}"
+                                   Visibility="{Binding Settings.ShowHeart, Converter={StaticResource BoolToVis}}">
+                            <TextBlock.RenderTransform>
+                                <ScaleTransform x:Name="HeartScale" />
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                        <Grid>
+                            <!-- Invisible "888" reserves width so the number doesn't jump in size between the placeholder, 95 and 105. -->
+                            <TextBlock Text="888" Visibility="Hidden" FontSize="100" FontWeight="Bold"
+                                       FontFamily="{Binding Settings.FontFamily}" />
+                            <TextBlock Text="{Binding DisplayText}" HorizontalAlignment="Center" FontSize="100" FontWeight="Bold"
+                                       FontFamily="{Binding Settings.FontFamily}"
+                                       Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}" />
+                        </Grid>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ZoneName}" HorizontalAlignment="Center" FontSize="26" Margin="0,-10,0,0"
+                               FontFamily="{Binding Settings.FontFamily}"
+                               Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}"
+                               Visibility="{Binding Settings.ShowZoneName, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+            </Viewbox>
+
+            <c:HeartRateGraph x:Name="Graph" Grid.Row="1" Margin="0,4,0,0" LineThickness="2.5"
+                              Samples="{Binding Samples}"
+                              Zones="{Binding Settings.Zones}"
+                              WindowMinutes="{Binding Settings.OverlayGraphMinutes}"
+                              DefaultColor="{Binding Settings.FixedColor}"
+                              UseZoneColors="{Binding Settings.ColorMode, Converter={StaticResource EnumToBool}, ConverterParameter=Zone}" />
+        </Grid>
+    </Grid>
+</Window>
