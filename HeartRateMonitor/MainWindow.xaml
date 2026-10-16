@@ -8,6 +8,7 @@
     <Window.Resources>
         <c:HexToBrushConverter x:Key="HexToBrush" />
         <c:EnumToBoolConverter x:Key="EnumToBool" />
+        <c:HeartRateDisplayToVisibilityConverter x:Key="DisplayToVis" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <Style TargetType="GroupBox">
@@ -75,10 +76,22 @@
             <TabItem Header="Live">
                 <DockPanel Margin="10">
                     <DockPanel DockPanel.Dock="Top">
-                        <TextBlock DockPanel.Dock="Left" Text="{Binding DisplayText}" FontSize="64" FontWeight="Bold"
-                                   MinWidth="130" Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}" />
+                        <StackPanel DockPanel.Dock="Left" MinWidth="130"
+                                    Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Strap}">
+                            <TextBlock Text="{Binding Strap.Text}" FontSize="64" FontWeight="Bold"
+                                       Foreground="{Binding Strap.Color, Converter={StaticResource HexToBrush}}" />
+                            <TextBlock Text="strap" Foreground="#555" Margin="2,-8,0,0"
+                                       Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Left" MinWidth="130" Margin="10,0,0,0"
+                                    Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Calculated}">
+                            <TextBlock Text="{Binding Calculated.Text}" FontSize="64" FontWeight="Bold"
+                                       Foreground="{Binding Calculated.Color, Converter={StaticResource HexToBrush}}" />
+                            <TextBlock Text="from beats" Foreground="#555" Margin="2,-8,0,0"
+                                       Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                        </StackPanel>
                         <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
-                            <TextBlock Text="{Binding ZoneName}" FontSize="18" />
+                            <TextBlock Text="{Binding MainLead.ZoneName}" FontSize="18" />
                             <TextBlock Text="{Binding StatsText}" Foreground="#555" Margin="0,4,0,0" />
                         </StackPanel>
                     </DockPanel>
@@ -94,7 +107,8 @@
 
                     <Border BorderBrush="#CCC" BorderThickness="1" Background="#1E1E1E" Margin="0,8,0,0">
                         <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}"
-                                          ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF" />
+                                          ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF"
+                                          Display="{Binding Settings.MainDisplay}" />
                     </Border>
                 </DockPanel>
             </TabItem>
@@ -168,7 +182,18 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="4" Text="Show" VerticalAlignment="Center" />
+                                <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                                    <RadioButton Content="Strap's number"
+                                                 IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Strap}" />
+                                    <RadioButton Content="Calculated from beats"
+                                                 IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Calculated}" />
+                                    <RadioButton Content="Both"
+                                                 IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Both}" />
+                                </StackPanel>
 
                                 <TextBlock Text="Color" VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,3">
@@ -306,6 +331,20 @@
                             <CheckBox Content="Connect automatically on startup" IsChecked="{Binding Settings.AutoConnect}" />
                             <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,4,0,0"
                                        Text="The first heart rate strap found gets remembered and reconnected from then on. Disconnect it from your phone or watch first, since most straps only talk to one device at a time." />
+                        </StackPanel>
+                    </GroupBox>
+                    <GroupBox Header="Heart rate shown in this window">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Content="Strap's number"
+                                             IsChecked="{Binding Settings.MainDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Strap}" />
+                                <RadioButton Content="Calculated from beats"
+                                             IsChecked="{Binding Settings.MainDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Calculated}" />
+                                <RadioButton Content="Both"
+                                             IsChecked="{Binding Settings.MainDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Both}" />
+                            </StackPanel>
+                            <TextBlock Foreground="#555" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="The strap sends its own number plus the time between each beat. &quot;Calculated from beats&quot; works the rate out from those times, which can be more accurate when the strap's number looks wrong. With both, the calculated line on the graph is cyan." />
                         </StackPanel>
                     </GroupBox>
                     <GroupBox Header="Recording">

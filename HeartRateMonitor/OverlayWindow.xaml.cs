@@ -48,13 +48,21 @@ public partial class OverlayWindow : Window
 
         _vm.PropertyChanged += OnViewModelChanged;
         _vm.Settings.PropertyChanged += OnSettingsChanged;
+        _vm.Strap.PropertyChanged += OnReadingChanged;
+        _vm.Calculated.PropertyChanged += OnReadingChanged;
         ApplyOutline();
         UpdateHeartbeat();
     }
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MainViewModel.CurrentBpm) or nameof(MainViewModel.IsStale))
+        if (e.PropertyName is nameof(MainViewModel.OverlayLead))
+            UpdateHeartbeat();
+    }
+
+    private void OnReadingChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(BpmReading.Bpm))
             UpdateHeartbeat();
     }
 
@@ -75,7 +83,7 @@ public partial class OverlayWindow : Window
 
     private void UpdateHeartbeat()
     {
-        if (_vm.IsStale || _vm.CurrentBpm is not { } bpm || bpm <= 0)
+        if (_vm.OverlayLead.Bpm is not { } bpm || bpm <= 0)
         {
             _heartbeat.Stop();
             return;

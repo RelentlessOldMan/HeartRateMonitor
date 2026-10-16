@@ -14,6 +14,7 @@
         <c:HexToBrushConverter x:Key="HexToBrush" />
         <c:BoolToStarConverter x:Key="BoolToStar" />
         <c:EnumToBoolConverter x:Key="EnumToBool" />
+        <c:HeartRateDisplayToVisibilityConverter x:Key="DisplayToVis" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </Window.Resources>
 
@@ -23,6 +24,14 @@
             <MenuItem Header="Show graph" IsCheckable="True" IsChecked="{Binding Settings.ShowOverlayGraph}" />
             <MenuItem Header="Show heart" IsCheckable="True" IsChecked="{Binding Settings.ShowHeart}" />
             <MenuItem Header="Show zone name" IsCheckable="True" IsChecked="{Binding Settings.ShowZoneName}" />
+            <MenuItem Header="Heart rate">
+                <MenuItem Header="Strap's number" IsCheckable="True"
+                          IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Strap}" />
+                <MenuItem Header="Calculated from beats" IsCheckable="True"
+                          IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Calculated}" />
+                <MenuItem Header="Both" IsCheckable="True"
+                          IsChecked="{Binding Settings.OverlayDisplay, Converter={StaticResource EnumToBool}, ConverterParameter=Both}" />
+            </MenuItem>
             <Separator />
             <MenuItem Header="Settings…" Click="Settings_Click" />
             <MenuItem Header="Hide overlay" Click="Hide_Click" />
@@ -47,24 +56,49 @@
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <TextBlock x:Name="Heart" Text="&#x2665;" FontFamily="Segoe UI Symbol" FontSize="64"
                                    VerticalAlignment="Center" Margin="0,8,10,0" RenderTransformOrigin="0.5,0.5"
-                                   Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}"
+                                   Foreground="{Binding OverlayLead.Color, Converter={StaticResource HexToBrush}}"
                                    Visibility="{Binding Settings.ShowHeart, Converter={StaticResource BoolToVis}}">
                             <TextBlock.RenderTransform>
                                 <ScaleTransform x:Name="HeartScale" />
                             </TextBlock.RenderTransform>
                         </TextBlock>
-                        <Grid>
-                            <!-- Invisible "888" reserves width so the number doesn't jump in size between the placeholder, 95 and 105. -->
-                            <TextBlock Text="888" Visibility="Hidden" FontSize="100" FontWeight="Bold"
-                                       FontFamily="{Binding Settings.FontFamily}" />
-                            <TextBlock Text="{Binding DisplayText}" HorizontalAlignment="Center" FontSize="100" FontWeight="Bold"
+                        <StackPanel
+                                    Visibility="{Binding Settings.OverlayDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Strap}">
+                            <Grid>
+                                <!-- Invisible "888" reserves width so the number doesn't jump in size between the placeholder, 95 and 105. -->
+                                <TextBlock Text="888" Visibility="Hidden" FontSize="100" FontWeight="Bold"
+                                           FontFamily="{Binding Settings.FontFamily}" />
+                                <TextBlock Text="{Binding Strap.Text}" HorizontalAlignment="Center" FontSize="100" FontWeight="Bold"
+                                           FontFamily="{Binding Settings.FontFamily}"
+                                           Foreground="{Binding Strap.Color, Converter={StaticResource HexToBrush}}" />
+                            </Grid>
+                            <TextBlock Text="strap" HorizontalAlignment="Center" FontSize="20" Margin="0,-14,0,0"
                                        FontFamily="{Binding Settings.FontFamily}"
-                                       Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}" />
-                        </Grid>
+                                       Foreground="{Binding Strap.Color, Converter={StaticResource HexToBrush}}"
+                                       Visibility="{Binding Settings.OverlayDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                        </StackPanel>
+                        <!-- Gap between the two numbers when both are shown. -->
+                        <Border Width="24"
+                                Visibility="{Binding Settings.OverlayDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                        <StackPanel
+                                    Visibility="{Binding Settings.OverlayDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Calculated}">
+                            <Grid>
+                                <!-- Invisible "888" reserves width so the number doesn't jump in size between the placeholder, 95 and 105. -->
+                                <TextBlock Text="888" Visibility="Hidden" FontSize="100" FontWeight="Bold"
+                                           FontFamily="{Binding Settings.FontFamily}" />
+                                <TextBlock Text="{Binding Calculated.Text}" HorizontalAlignment="Center" FontSize="100" FontWeight="Bold"
+                                           FontFamily="{Binding Settings.FontFamily}"
+                                           Foreground="{Binding Calculated.Color, Converter={StaticResource HexToBrush}}" />
+                            </Grid>
+                            <TextBlock Text="beats" HorizontalAlignment="Center" FontSize="20" Margin="0,-14,0,0"
+                                       FontFamily="{Binding Settings.FontFamily}"
+                                       Foreground="{Binding Calculated.Color, Converter={StaticResource HexToBrush}}"
+                                       Visibility="{Binding Settings.OverlayDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                        </StackPanel>
                     </StackPanel>
-                    <TextBlock Text="{Binding ZoneName}" HorizontalAlignment="Center" FontSize="26" Margin="0,-10,0,0"
+                    <TextBlock Text="{Binding OverlayLead.ZoneName}" HorizontalAlignment="Center" FontSize="26" Margin="0,-10,0,0"
                                FontFamily="{Binding Settings.FontFamily}"
-                               Foreground="{Binding CurrentColor, Converter={StaticResource HexToBrush}}"
+                               Foreground="{Binding OverlayLead.Color, Converter={StaticResource HexToBrush}}"
                                Visibility="{Binding Settings.ShowZoneName, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
             </Viewbox>
@@ -74,7 +108,8 @@
                               Zones="{Binding Settings.Zones}"
                               WindowMinutes="{Binding Settings.OverlayGraphMinutes}"
                               DefaultColor="{Binding Settings.FixedColor}"
-                              UseZoneColors="{Binding Settings.ColorMode, Converter={StaticResource EnumToBool}, ConverterParameter=Zone}" />
+                              UseZoneColors="{Binding Settings.ColorMode, Converter={StaticResource EnumToBool}, ConverterParameter=Zone}"
+                              Display="{Binding Settings.OverlayDisplay}" />
         </Grid>
     </Grid>
 </Window>

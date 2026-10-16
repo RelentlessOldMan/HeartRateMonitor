@@ -41,18 +41,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     // --- Live display ---
-    private int? _currentBpm;
+    private readonly BeatRateCalculator _beatRate = new();
+    private int? _strapBpm, _calculatedBpm;
     private bool _isStale = true;
-    private HeartRateZone? _currentZone;
-    private string _currentColor = "#FFFFFF";
 
-    public int? CurrentBpm { get => _currentBpm; private set { if (SetField(ref _currentBpm, value)) OnPropertyChanged(nameof(DisplayText)); } }
-    public bool IsStale { get => _isStale; private set { if (SetField(ref _isStale, value)) OnPropertyChanged(nameof(DisplayText)); } }
-    public string DisplayText => IsStale || CurrentBpm is null ? "--" : CurrentBpm.Value.ToString();
-    public HeartRateZone? CurrentZone { get => _currentZone; private set { if (SetField(ref _currentZone, value)) OnPropertyChanged(nameof(ZoneName)); } }
-    public string ZoneName => IsStale ? "" : CurrentZone?.Name ?? "";
-    /// <summary>The color the BPM number should be right now.</summary>
-    public string CurrentColor { get => _currentColor; private set => SetField(ref _currentColor, value); }
+    public bool IsStale { get => _isStale; private set => SetField(ref _isStale, value); }
+    /// <summary>The heart rate the strap reports.</summary>
+    public BpmReading Strap { get; } = new();
+    /// <summary>The heart rate worked out from the beat-to-beat intervals.</summary>
+    public BpmReading Calculated { get; } = new();
+    /// <summary>The reading the main window's zone name follows: the calculated one if that's all it shows, else the strap's.</summary>
+    public BpmReading MainLead => Settings.MainDisplay == HeartRateDisplay.Calculated ? Calculated : Strap;
+    /// <summary>The reading the overlay's heart and zone name follow.</summary>
+    public BpmReading OverlayLead => Settings.OverlayDisplay == HeartRateDisplay.Calculated ? Calculated : Strap;
 
     // --- Connection ---
     private SourceState _state;
@@ -97,7 +98,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void StartSource(bool force)
     {
         _source?.Dispose();
-        CurrentBpm = null;
+        _strapBpm = _calculatedBpm = null;
+        _beatRate.Reset();
+        RefreshReadings();
         BatteryLevel = null;
 
         if (IsDummy)
@@ -146,11 +149,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     internal void OnSample(HeartRateSample sample)
     {
         _lastSampleTime = DateTime.Now;
+        sample = sample with { CalculatedBpm = _beatRate.Add(sample) };
         Samples.Add(sample);
         _recorder?.Add(sample);
-        CurrentBpm = sample.Bpm;
+        _strapBpm = sample.Bpm;
+        _calculatedBpm = sample.CalculatedBpm;
         IsStale = false;
-        RefreshColor();
+        RefreshReadings();
         UpdateStats();
         TrackDaily(sample);
     }
@@ -158,7 +163,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void Tick()
     {
         IsStale = DateTime.Now - _lastSampleTime > StaleAfter;
-        RefreshColor();
+        RefreshReadings();
         if (_recorder is not null)
             RecordingText = $"Recording {DateTime.Now - _recorder.Start:hh\\:mm\\:ss}";
 
@@ -254,13 +259,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             : "No heart rate data yet today";
     }
 
-    private void RefreshColor()
+    private void RefreshReadings()
     {
-        CurrentZone = CurrentBpm is { } bpm ? HeartRateZone.Find(Settings.Zones, bpm) : null;
-        OnPropertyChanged(nameof(ZoneName));
-        CurrentColor = IsStale
-            ? "#808080"
-            : Settings.ColorMode == BpmColorMode.Zone && CurrentZone is not null ? CurrentZone.Color : Settings.FixedColor;
+        Strap.Update(_strapBpm, IsStale, Settings);
+        Calculated.Update(_calculatedBpm, IsStale, Settings);
     }
 
     private void UpdateStats()
@@ -305,9 +307,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (e.PropertyName is nameof(AppSettings.ColorMode) or nameof(AppSettings.FixedColor))
         {
-            RefreshColor();
+            RefreshReadings();
             UpdateZoneTimes();
         }
+        else if (e.PropertyName is nameof(AppSettings.MainDisplay))
+            OnPropertyChanged(nameof(MainLead));
+        else if (e.PropertyName is nameof(AppSettings.OverlayDisplay))
+            OnPropertyChanged(nameof(OverlayLead));
         else if (e.PropertyName is nameof(AppSettings.AutoConnect) && Settings.AutoConnect && State == SourceState.Idle)
             Reconnect();
     }
@@ -318,13 +324,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             zone.PropertyChanged -= OnZoneChanged;
         foreach (HeartRateZone zone in e.NewItems ?? Array.Empty<HeartRateZone>())
             zone.PropertyChanged += OnZoneChanged;
-        RefreshColor();
+        RefreshReadings();
         UpdateZoneTimes();
     }
 
     private void OnZoneChanged(object? sender, PropertyChangedEventArgs e)
     {
-        RefreshColor();
+        RefreshReadings();
         UpdateZoneTimes();
     }
 

@@ -25,6 +25,13 @@ public sealed class AppSettings : ObservableObject
     public string? DeviceName { get => _deviceName; set => SetField(ref _deviceName, value); }
     public bool AutoConnect { get => _autoConnect; set => SetField(ref _autoConnect, value); }
 
+    // --- Which heart rate to show: the strap's own number, the one calculated from beat timings, or both ---
+    private HeartRateDisplay _mainDisplay = HeartRateDisplay.Both;
+    private HeartRateDisplay _overlayDisplay = HeartRateDisplay.Strap;
+
+    public HeartRateDisplay MainDisplay { get => _mainDisplay; set => SetField(ref _mainDisplay, value); }
+    public HeartRateDisplay OverlayDisplay { get => _overlayDisplay; set => SetField(ref _overlayDisplay, value); }
+
     // --- Overlay window ---
     private bool _overlayVisible = true;
     private bool _overlayLocked;

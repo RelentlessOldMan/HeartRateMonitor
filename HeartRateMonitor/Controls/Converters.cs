@@ -45,3 +45,25 @@ public sealed class EnumToBoolConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
         value is true ? Enum.Parse(targetType, (string)parameter) : Binding.DoNothing;
 }
+
+/// <summary>
+/// HeartRateDisplay → Visibility. Parameter "Strap"/"Calculated": visible when that reading is shown.
+/// Parameter "Both": visible only when both are shown (for captions telling them apart).
+/// </summary>
+public sealed class HeartRateDisplayToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var display = value as HeartRateMonitor.Models.HeartRateDisplay? ?? HeartRateMonitor.Models.HeartRateDisplay.Strap;
+        bool visible = (string)parameter switch
+        {
+            "Strap" => display != HeartRateMonitor.Models.HeartRateDisplay.Calculated,
+            "Calculated" => display != HeartRateMonitor.Models.HeartRateDisplay.Strap,
+            _ => display == HeartRateMonitor.Models.HeartRateDisplay.Both,
+        };
+        return visible ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}

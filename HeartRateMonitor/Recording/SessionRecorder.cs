@@ -24,7 +24,7 @@ public sealed class SessionRecorder : IDisposable
         _start = DateTime.Now;
         CsvPath = Path.Combine(folder, $"HeartRate_{_start:yyyy-MM-dd_HH-mm-ss}.csv");
         _csv = new StreamWriter(CsvPath, append: false, new UTF8Encoding(false));
-        _csv.WriteLine("timestamp,elapsed_s,bpm,rr_intervals_ms,sensor_contact");
+        _csv.WriteLine("timestamp,elapsed_s,bpm,rr_intervals_ms,sensor_contact,calculated_bpm");
         _csv.Flush();
     }
 
@@ -35,7 +35,7 @@ public sealed class SessionRecorder : IDisposable
         string rr = string.Join(";", sample.RrIntervalsMs.Select(r => r.ToString("0.#", inv)));
         string contact = sample.SensorContact switch { true => "1", false => "0", null => "" };
         double elapsed = (sample.Time - _start).TotalSeconds;
-        _csv.WriteLine(string.Create(inv, $"{sample.Time:yyyy-MM-ddTHH:mm:ss.fffzzz},{elapsed:0.0},{sample.Bpm},{rr},{contact}"));
+        _csv.WriteLine(string.Create(inv, $"{sample.Time:yyyy-MM-ddTHH:mm:ss.fffzzz},{elapsed:0.0},{sample.Bpm},{rr},{contact},{sample.CalculatedBpm}"));
         _csv.Flush();
     }
 

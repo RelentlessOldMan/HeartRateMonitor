@@ -9,6 +9,9 @@ namespace HeartRateMonitor.Controls;
 /// <summary>Line graph of heart rate over time, colored by zone, with optional zone bands behind it.</summary>
 public sealed class HeartRateGraph : FrameworkElement
 {
+    /// <summary>Color of the calculated line when it's drawn next to the strap's, so the two can be told apart.</summary>
+    public const string CalculatedLineColor = "#00E5FF";
+
     /// <summary>Samples further apart than this are drawn as a gap (e.g. strap dropped out).</summary>
     private static readonly TimeSpan GapThreshold = TimeSpan.FromSeconds(5);
 
@@ -44,6 +47,10 @@ public sealed class HeartRateGraph : FrameworkElement
         nameof(LineThickness), typeof(double), typeof(HeartRateGraph),
         new FrameworkPropertyMetadata(2.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty DisplayProperty = DependencyProperty.Register(
+        nameof(Display), typeof(HeartRateDisplay), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(HeartRateDisplay.Strap, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public IList<HeartRateSample>? Samples { get => (IList<HeartRateSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
     public IEnumerable<HeartRateZone>? Zones { get => (IEnumerable<HeartRateZone>?)GetValue(ZonesProperty); set => SetValue(ZonesProperty, value); }
     /// <summary>Show only the last N minutes, scrolling. 0 = the whole session.</summary>
@@ -54,6 +61,8 @@ public sealed class HeartRateGraph : FrameworkElement
     public bool ShowZoneBands { get => (bool)GetValue(ShowZoneBandsProperty); set => SetValue(ShowZoneBandsProperty, value); }
     public bool ShowLabels { get => (bool)GetValue(ShowLabelsProperty); set => SetValue(ShowLabelsProperty, value); }
     public double LineThickness { get => (double)GetValue(LineThicknessProperty); set => SetValue(LineThicknessProperty, value); }
+    /// <summary>Which line(s) to draw. With both, the calculated one is drawn in <see cref="CalculatedLineColor"/>.</summary>
+    public HeartRateDisplay Display { get => (HeartRateDisplay)GetValue(DisplayProperty); set => SetValue(DisplayProperty, value); }
 
     public HeartRateGraph()
     {
@@ -99,13 +108,26 @@ public sealed class HeartRateGraph : FrameworkElement
         if (first >= samples.Count)
             return;
 
+        bool showStrap = Display != HeartRateDisplay.Calculated;
+        bool showCalculated = Display != HeartRateDisplay.Strap;
+        static int? StrapValue(HeartRateSample s) => s.Bpm;
+        static int? CalculatedValue(HeartRateSample s) => s.CalculatedBpm;
+
         // BPM axis: fit the visible data with some headroom, at least 40 bpm tall.
         int min = int.MaxValue, max = int.MinValue;
         for (int i = first; i < samples.Count; i++)
         {
-            min = Math.Min(min, samples[i].Bpm);
-            max = Math.Max(max, samples[i].Bpm);
+            foreach (int? value in (ReadOnlySpan<int?>)[showStrap ? samples[i].Bpm : null, showCalculated ? samples[i].CalculatedBpm : null])
+            {
+                if (value is { } v)
+                {
+                    min = Math.Min(min, v);
+                    max = Math.Max(max, v);
+                }
+            }
         }
+        if (min > max)
+            return; // Nothing to draw, e.g. only the calculated line and no beat data yet.
         double lo = min - 10, hi = max + 10;
         if (hi - lo < 40)
         {
@@ -130,50 +152,66 @@ public sealed class HeartRateGraph : FrameworkElement
             }
         }
 
-        // Draw runs of same-colored, contiguous samples as one polyline each.
         string ColorFor(int bpm) =>
             UseZoneColors ? HeartRateZone.Find(zones, bpm)?.Color ?? DefaultColor : DefaultColor;
 
-        var run = new List<Point>();
-        string? runColor = null;
-        void Flush()
+        // Draw runs of same-colored, contiguous samples as one polyline each.
+        void DrawLine(Func<HeartRateSample, int?> valueOf, Func<int, string> colorFor)
         {
-            if (run.Count >= 2 && runColor is not null)
-                DrawPolyline(dc, run, BrushCache.GetPen(runColor, LineThickness));
-            run.Clear();
+            var run = new List<Point>();
+            string? runColor = null;
+            void Flush()
+            {
+                if (run.Count >= 2 && runColor is not null)
+                    DrawPolyline(dc, run, BrushCache.GetPen(runColor, LineThickness));
+                run.Clear();
+            }
+
+            double lastX = double.NegativeInfinity;
+            DateTime? lastTime = null;
+            for (int i = first; i < samples.Count; i++)
+            {
+                var sample = samples[i];
+                if (valueOf(sample) is not { } bpm)
+                {
+                    Flush(); // No value here: break the line.
+                    lastTime = null;
+                    continue;
+                }
+                var point = new Point(X(sample.Time), Y(bpm));
+                bool gap = lastTime is { } t && sample.Time - t > GapThreshold;
+                string color = colorFor(bpm);
+
+                if (gap || lastTime is null)
+                {
+                    Flush();
+                    runColor = color;
+                }
+                else if (color != runColor)
+                {
+                    // Start the new color at the previous point so the line stays continuous.
+                    Point? joint = run.Count > 0 ? run[^1] : null;
+                    Flush();
+                    if (joint is { } j)
+                        run.Add(j);
+                    runColor = color;
+                }
+                else if (point.X - lastX < 0.75 && i != samples.Count - 1)
+                {
+                    continue; // More samples than pixels: skip ones that would land on the same column.
+                }
+
+                run.Add(point);
+                lastX = point.X;
+                lastTime = sample.Time;
+            }
+            Flush();
         }
 
-        double lastX = double.NegativeInfinity;
-        for (int i = first; i < samples.Count; i++)
-        {
-            var sample = samples[i];
-            var point = new Point(X(sample.Time), Y(sample.Bpm));
-            bool gap = i > first && sample.Time - samples[i - 1].Time > GapThreshold;
-            string color = ColorFor(sample.Bpm);
-
-            if (gap)
-            {
-                Flush();
-                runColor = color;
-            }
-            else if (color != runColor)
-            {
-                // Start the new color at the previous point so the line stays continuous.
-                Point? joint = run.Count > 0 ? run[^1] : null;
-                Flush();
-                if (joint is { } j)
-                    run.Add(j);
-                runColor = color;
-            }
-            else if (point.X - lastX < 0.75 && i != samples.Count - 1)
-            {
-                continue; // More samples than pixels: skip ones that would land on the same column.
-            }
-
-            run.Add(point);
-            lastX = point.X;
-        }
-        Flush();
+        if (showStrap)
+            DrawLine(StrapValue, ColorFor);
+        if (showCalculated)
+            DrawLine(CalculatedValue, showStrap ? _ => CalculatedLineColor : ColorFor);
 
         if (ShowLabels)
         {
@@ -184,6 +222,22 @@ public sealed class HeartRateGraph : FrameworkElement
             dc.DrawText(Label(((int)hi).ToString()), new Point(4, 2));
             var bottom = Label(((int)lo).ToString());
             dc.DrawText(bottom, new Point(4, height - bottom.Height - 2));
+
+            if (showStrap && showCalculated)
+            {
+                // Legend, top right: which line is which.
+                double x = width - 4;
+                foreach (var (text, color) in new[] { ("calculated", CalculatedLineColor), ("strap", DefaultColor) })
+                {
+                    var label = Label(text);
+                    x -= label.Width;
+                    dc.DrawText(label, new Point(x, 2));
+                    x -= 20;
+                    double y = 2 + label.Height / 2;
+                    dc.DrawLine(BrushCache.GetPen(color, 2), new Point(x, y), new Point(x + 14, y));
+                    x -= 12;
+                }
+            }
         }
     }
 

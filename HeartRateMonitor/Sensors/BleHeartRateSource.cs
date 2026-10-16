@@ -33,6 +33,7 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
     private long _disconnectedSinceTicks;
     private int _samplesSinceLog;
     private volatile Models.HeartRateSample? _lastSample;
+    private int _lastBatteryLevel = -1;
 
     public event Action<Models.HeartRateSample>? SampleReceived;
     public event Action<SourceState, string>? StateChanged;
@@ -225,7 +226,7 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
 
             if (now - lastSampleLog >= SampleLogInterval)
             {
-                Log.Info($"BLE: {Interlocked.Exchange(ref _samplesSinceLog, 0)} samples in the last {(now - lastSampleLog).TotalSeconds:0} s, latest {_lastSample?.Bpm} bpm, contact {_lastSample?.SensorContact?.ToString() ?? "n/a"}");
+                Log.Info($"BLE: {Interlocked.Exchange(ref _samplesSinceLog, 0)} samples in the last {(now - lastSampleLog).TotalSeconds:0} s, latest {_lastSample?.Bpm} bpm ({BeatsText(_lastSample)}), contact {_lastSample?.SensorContact?.ToString() ?? "n/a"}");
                 lastSampleLog = now;
             }
         }
@@ -279,7 +280,7 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
         var sample = HeartRateMeasurementParser.Parse(bytes, DateTime.Now);
         // Log the very first packet of each connection raw, in case a strap encodes things oddly.
         if (Interlocked.Exchange(ref _lastSampleTicks, DateTime.UtcNow.Ticks) == 0)
-            Log.Info($"BLE: first heart rate packet [{Convert.ToHexString(bytes)}] -> {sample?.Bpm.ToString() ?? "unparseable"} bpm, contact {sample?.SensorContact?.ToString() ?? "n/a"}");
+            Log.Info($"BLE: first heart rate packet [{Convert.ToHexString(bytes)}] -> {sample?.Bpm.ToString() ?? "unparseable"} bpm ({BeatsText(sample)}), contact {sample?.SensorContact?.ToString() ?? "n/a"}");
         Interlocked.Increment(ref _samplesSinceLog);
         if (sample is not null)
         {
@@ -294,12 +295,19 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
     private void RaiseBattery(IBuffer buffer)
     {
         var bytes = ToBytes(buffer);
-        if (bytes.Length > 0)
+        // Some straps send the battery level every second; only pass on (and log) actual changes.
+        if (bytes.Length > 0 && Interlocked.Exchange(ref _lastBatteryLevel, bytes[0]) != bytes[0])
         {
             Log.Info($"BLE: battery {bytes[0]}%");
             BatteryLevelChanged?.Invoke(bytes[0]);
         }
     }
+
+    /// <summary>What the packet's RR intervals alone say the heart rate is, to compare against the strap's number.</summary>
+    private static string BeatsText(Models.HeartRateSample? sample) =>
+        sample is { RrIntervalsMs.Count: > 0 } s
+            ? $"beats say {60000 / s.RrIntervalsMs.Average():0}"
+            : "no beat intervals";
 
     private void OnConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {

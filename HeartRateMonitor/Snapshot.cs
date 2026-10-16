@@ -58,6 +58,7 @@ public static class Snapshot
             Path.Combine(folder, "overlay.png"));
         settings.ShowOverlayGraph = true;
         settings.ShowZoneName = true;
+        settings.OverlayDisplay = HeartRateDisplay.Both;
         await Render(overlayContent, settings.OverlayWidth, settings.OverlayHeight + 80, gameBackdrop,
             Path.Combine(folder, "overlay_graph.png"));
 
