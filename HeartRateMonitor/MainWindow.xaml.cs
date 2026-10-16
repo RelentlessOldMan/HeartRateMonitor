@@ -26,12 +26,12 @@ public partial class MainWindow : Window
             if (e.PropertyName == nameof(MainViewModel.IsRecording))
                 RecordButton.Content = _vm.IsRecording ? "■ Stop recording" : "● Start recording";
         };
-        var version = Assembly.GetEntryAssembly()?.GetName().Version;
-        if (version is not null)
-            Title += $" v{version.ToString(3)}";
+        Title += $" v{AppVersion}";
         if (vm.IsDummy)
             Title += " (dummy data)";
     }
+
+    public static string AppVersion { get; } = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "?";
 
     /// <summary>Set by App so the "Reset position" button can reach the overlay.</summary>
     public OverlayWindow? Overlay { get; set; }
@@ -124,6 +124,27 @@ public partial class MainWindow : Window
         var dialog = new OpenFolderDialog { InitialDirectory = _vm.Settings.RecordingFolder };
         if (dialog.ShowDialog(this) == true)
             _vm.Settings.RecordingFolder = dialog.FolderName;
+    }
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (File.Exists(Log.FilePath))
+            Process.Start("explorer.exe", $"/select,\"{Log.FilePath}\"");
+        else
+            Process.Start(new ProcessStartInfo(Directory.CreateDirectory(Log.Folder).FullName) { UseShellExecute = true });
+    }
+
+    private void CopyLog_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(Log.ReadAll());
+            MessageBox.Show(this, "The log is on the clipboard, ready to paste.", "Copy log", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Couldn't copy the log: {ex.Message}", "Copy log", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     // --- Helpers ---

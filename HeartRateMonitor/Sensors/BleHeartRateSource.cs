@@ -12,6 +12,11 @@ namespace HeartRateMonitor.Sensors;
 public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
+    /// <summary>How long a dropped link may take to come back on its own before we start over.</summary>
+    private static readonly TimeSpan DisconnectGrace = TimeSpan.FromSeconds(6);
+    /// <summary>Straps send about once a second; this long without data means the link is broken.</summary>
+    private static readonly TimeSpan NoDataTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan SampleLogInterval = TimeSpan.FromSeconds(30);
 
     private readonly CancellationTokenSource _cts = new();
     private ulong? _address = address;
@@ -22,7 +27,12 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
     private readonly List<GattDeviceService> _services = [];
     private GattCharacteristic? _heartRateCharacteristic;
     private GattCharacteristic? _batteryCharacteristic;
-    private TaskCompletionSource? _disconnected;
+
+    // Written from WinRT callback threads, read by the monitor loop (UTC ticks, 0 = none).
+    private long _lastSampleTicks;
+    private long _disconnectedSinceTicks;
+    private int _samplesSinceLog;
+    private volatile Models.HeartRateSample? _lastSample;
 
     public event Action<Models.HeartRateSample>? SampleReceived;
     public event Action<SourceState, string>? StateChanged;
@@ -34,24 +44,28 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
 
     private async Task RunAsync(CancellationToken ct)
     {
+        Log.Info($"BLE: starting, remembered strap {(_address is { } a ? FormatAddress(a) : "none")}");
         bool everConnected = false;
+        int attempt = 0;
         while (!ct.IsCancellationRequested)
         {
+            attempt++;
             try
             {
                 // Always wait for an advertisement first, even for the remembered strap: Windows can
                 // only connect to an unpaired BLE device by address if it has seen it advertise recently.
-                StateChanged?.Invoke(SourceState.Searching, _address is null
+                SetState(SourceState.Searching, _address is null
                     ? "Looking for a heart rate strap…"
                     : "Waiting for the strap (wear it and wet the pads)…");
-                _address = await FindStrapAsync(_address, ct);
+                var (found, addressType) = await FindStrapAsync(_address, ct);
+                _address = found;
 
-                StateChanged?.Invoke(everConnected ? SourceState.Reconnecting : SourceState.Connecting, "Connecting…");
-                await ConnectAsync(_address.Value);
+                SetState(everConnected ? SourceState.Reconnecting : SourceState.Connecting, "Connecting…");
+                await ConnectAsync(found, addressType);
                 everConnected = true;
-                StateChanged?.Invoke(SourceState.Connected, _device!.Name);
-                await _disconnected!.Task.WaitAsync(ct);
-                StateChanged?.Invoke(SourceState.Reconnecting, "Connection lost, reconnecting…");
+                attempt = 0;
+                SetState(SourceState.Connected, _device!.Name);
+                await MonitorAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -59,7 +73,8 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
             }
             catch (Exception ex)
             {
-                StateChanged?.Invoke(everConnected ? SourceState.Reconnecting : SourceState.Connecting, ex.Message);
+                Log.Warn($"BLE: attempt {attempt} failed: {ex.GetType().Name}: {ex.Message} (HRESULT 0x{ex.HResult:X8})");
+                SetState(everConnected ? SourceState.Reconnecting : SourceState.Connecting, ex.Message);
             }
             finally
             {
@@ -70,13 +85,24 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
             catch (OperationCanceledException) { break; }
         }
 
+        Log.Info("BLE: stopped");
         StateChanged?.Invoke(SourceState.Idle, "Disconnected");
     }
 
-    /// <summary>Waits for <paramref name="wanted"/> to advertise, or for any heart rate strap if null.</summary>
-    private static async Task<ulong> FindStrapAsync(ulong? wanted, CancellationToken ct)
+    private void SetState(SourceState state, string text)
     {
-        var found = new TaskCompletionSource<ulong>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Log.Info($"BLE: state {state}: {text}");
+        StateChanged?.Invoke(state, text);
+    }
+
+    /// <summary>
+    /// Waits for <paramref name="wanted"/> to advertise, or for any heart rate strap if null.
+    /// Returns the address type too: many straps use random addresses, and connecting to one
+    /// as if it were a public address can give a link that connects but never delivers data.
+    /// </summary>
+    private static async Task<(ulong Address, BluetoothAddressType Type)> FindStrapAsync(ulong? wanted, CancellationToken ct)
+    {
+        var found = new TaskCompletionSource<(ulong, BluetoothAddressType)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active };
 
         // No advertisement filter: the scan response that carries the name doesn't repeat the
@@ -86,8 +112,12 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
             bool match = wanted is { } address
                 ? e.BluetoothAddress == address
                 : e.Advertisement.ServiceUuids.Contains(GattServiceUuids.HeartRate);
-            if (match)
-                found.TrySetResult(e.BluetoothAddress);
+            if (match && found.TrySetResult((e.BluetoothAddress, e.BluetoothAddressType)))
+            {
+                Log.Info($"BLE: found {FormatAddress(e.BluetoothAddress)} ({e.BluetoothAddressType}) " +
+                         $"name \"{e.Advertisement.LocalName}\" RSSI {e.RawSignalStrengthInDBm} dBm, {e.AdvertisementType}, " +
+                         $"services [{string.Join(", ", e.Advertisement.ServiceUuids.Select(ShortUuid))}]");
+            }
         };
         watcher.Stopped += (_, e) =>
         {
@@ -97,6 +127,7 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
 
         using var registration = ct.Register(() => found.TrySetCanceled(ct));
         watcher.Start();
+        Log.Info("BLE: scanning");
         try
         {
             return await found.Task;
@@ -107,12 +138,15 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
         }
     }
 
-    private async Task ConnectAsync(ulong address)
+    private async Task ConnectAsync(ulong address, BluetoothAddressType addressType)
     {
-        _device = await BluetoothLEDevice.FromBluetoothAddressAsync(address)
+        _device = await BluetoothLEDevice.FromBluetoothAddressAsync(address, addressType)
             ?? throw new InvalidOperationException("Strap not found. Is it on and being worn?");
+        Log.Info($"BLE: device \"{_device.Name}\" id {_device.DeviceId}, paired in Windows: {_device.DeviceInformation.Pairing.IsPaired}, " +
+                 $"status {_device.ConnectionStatus}");
 
-        _disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Interlocked.Exchange(ref _lastSampleTicks, 0);
+        Interlocked.Exchange(ref _disconnectedSinceTicks, 0);
         _device.ConnectionStatusChanged += OnConnectionStatusChanged;
 
         _session = await GattSession.FromDeviceIdAsync(_device.BluetoothDeviceId);
@@ -128,18 +162,79 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
 
         _heartRateCharacteristic = characteristics.Characteristics[0];
         _heartRateCharacteristic.ValueChanged += OnHeartRateValueChanged;
-        var status = await _heartRateCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-            GattClientCharacteristicConfigurationDescriptorValue.Notify);
-        if (status != GattCommunicationStatus.Success)
-            throw new InvalidOperationException($"Couldn't subscribe to heart rate ({status})");
+        await SubscribeHeartRateAsync();
 
         await SubscribeBatteryAsync();
+        Log.Info($"BLE: connected, MTU {_session.MaxPduSize}, status {_device.ConnectionStatus}");
         DeviceConnected?.Invoke(address, _device.Name);
+    }
+
+    private async Task SubscribeHeartRateAsync()
+    {
+        var status = await _heartRateCharacteristic!.WriteClientCharacteristicConfigurationDescriptorAsync(
+            GattClientCharacteristicConfigurationDescriptorValue.Notify);
+        Log.Info($"BLE: heart rate subscribe: {status}");
+        if (status != GattCommunicationStatus.Success)
+            throw new InvalidOperationException($"Couldn't subscribe to heart rate ({status})");
+    }
+
+    /// <summary>
+    /// Watches the connection until it's beyond saving. A brief drop is given time to recover
+    /// (Windows reconnects by itself because of MaintainConnection), after which we subscribe
+    /// again since an unpaired strap forgets subscriptions between connections. A link that
+    /// stays up but stops delivering heart rate is torn down too.
+    /// </summary>
+    private async Task MonitorAsync(CancellationToken ct)
+    {
+        var connectedAt = DateTime.UtcNow;
+        var lastSampleLog = DateTime.UtcNow;
+        bool dropped = false;
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            var now = DateTime.UtcNow;
+
+            long disconnectedSince = Interlocked.Read(ref _disconnectedSinceTicks);
+            if (disconnectedSince != 0)
+            {
+                if (!dropped)
+                {
+                    dropped = true;
+                    SetState(SourceState.Reconnecting, "Signal dropped, waiting for it to come back…");
+                }
+                if (now - new DateTime(disconnectedSince, DateTimeKind.Utc) > DisconnectGrace)
+                    throw new InvalidOperationException("Connection lost, reconnecting…");
+                continue;
+            }
+
+            if (dropped)
+            {
+                dropped = false;
+                Log.Info("BLE: link came back, subscribing again");
+                await SubscribeHeartRateAsync();
+                connectedAt = now;
+                SetState(SourceState.Connected, _device!.Name);
+            }
+
+            long lastSample = Interlocked.Read(ref _lastSampleTicks);
+            var lastData = lastSample != 0 && lastSample > connectedAt.Ticks
+                ? new DateTime(lastSample, DateTimeKind.Utc)
+                : connectedAt;
+            if (now - lastData > NoDataTimeout)
+                throw new InvalidOperationException($"Connected but no heart rate for {NoDataTimeout.TotalSeconds:0} s, reconnecting…");
+
+            if (now - lastSampleLog >= SampleLogInterval)
+            {
+                Log.Info($"BLE: {Interlocked.Exchange(ref _samplesSinceLog, 0)} samples in the last {(now - lastSampleLog).TotalSeconds:0} s, latest {_lastSample?.Bpm} bpm, contact {_lastSample?.SensorContact?.ToString() ?? "n/a"}");
+                lastSampleLog = now;
+            }
+        }
     }
 
     private async Task<GattDeviceService?> GetServiceAsync(Guid uuid)
     {
         var result = await _device!.GetGattServicesForUuidAsync(uuid, BluetoothCacheMode.Uncached);
+        Log.Info($"BLE: service {ShortUuid(uuid)}: {result.Status}, {result.Services.Count} found");
         if (result.Status != GattCommunicationStatus.Success || result.Services.Count == 0)
             return null;
         _services.AddRange(result.Services);
@@ -172,16 +267,25 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
                     GattClientCharacteristicConfigurationDescriptorValue.Notify);
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Log.Warn($"BLE: battery unavailable: {ex.Message}");
         }
     }
 
     private void OnHeartRateValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
     {
-        var sample = HeartRateMeasurementParser.Parse(ToBytes(args.CharacteristicValue), DateTime.Now);
+        var bytes = ToBytes(args.CharacteristicValue);
+        var sample = HeartRateMeasurementParser.Parse(bytes, DateTime.Now);
+        // Log the very first packet of each connection raw, in case a strap encodes things oddly.
+        if (Interlocked.Exchange(ref _lastSampleTicks, DateTime.UtcNow.Ticks) == 0)
+            Log.Info($"BLE: first heart rate packet [{Convert.ToHexString(bytes)}] -> {sample?.Bpm.ToString() ?? "unparseable"} bpm, contact {sample?.SensorContact?.ToString() ?? "n/a"}");
+        Interlocked.Increment(ref _samplesSinceLog);
         if (sample is not null)
+        {
+            _lastSample = sample;
             SampleReceived?.Invoke(sample);
+        }
     }
 
     private void OnBatteryValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args) =>
@@ -191,13 +295,20 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
     {
         var bytes = ToBytes(buffer);
         if (bytes.Length > 0)
+        {
+            Log.Info($"BLE: battery {bytes[0]}%");
             BatteryLevelChanged?.Invoke(bytes[0]);
+        }
     }
 
     private void OnConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
-        if (sender.ConnectionStatus == BluetoothConnectionStatus.Disconnected)
-            _disconnected?.TrySetResult();
+        var status = sender.ConnectionStatus;
+        Log.Info($"BLE: connection status {status}");
+        if (status == BluetoothConnectionStatus.Disconnected)
+            Interlocked.CompareExchange(ref _disconnectedSinceTicks, DateTime.UtcNow.Ticks, 0);
+        else
+            Interlocked.Exchange(ref _disconnectedSinceTicks, 0);
     }
 
     private static byte[] ToBytes(IBuffer buffer)
@@ -206,6 +317,18 @@ public sealed class BleHeartRateSource(ulong? address) : IHeartRateSource
         using var reader = DataReader.FromBuffer(buffer);
         reader.ReadBytes(bytes);
         return bytes;
+    }
+
+    public static string FormatAddress(ulong address) =>
+        string.Join(":", Enumerable.Range(0, 6).Select(i => ((address >> (40 - 8 * i)) & 0xFF).ToString("X2")));
+
+    /// <summary>"180D" for standard Bluetooth UUIDs, the full GUID otherwise.</summary>
+    private static string ShortUuid(Guid uuid)
+    {
+        var text = uuid.ToString();
+        return text.EndsWith("-0000-1000-8000-00805f9b34fb") && text.StartsWith("0000")
+            ? text.Substring(4, 4).ToUpperInvariant()
+            : text;
     }
 
     private void Cleanup()

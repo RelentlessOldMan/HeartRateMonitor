@@ -37,6 +37,15 @@ public partial class App : Application
 
         bool dummy = e.Args.Any(a => a.TrimStart('-', '/').Equals("dummy", StringComparison.OrdinalIgnoreCase));
 
+        Log.Init();
+        Log.Info($"=== HeartRateMonitor {HeartRateMonitor.MainWindow.AppVersion} starting{(e.Args.Length > 0 ? $" ({string.Join(" ", e.Args)})" : "")} ===");
+        Log.Info($"Windows {Environment.OSVersion.Version}, .NET {Environment.Version}, {(Environment.Is64BitProcess ? "x64" : "x86")}");
+        DispatcherUnhandledException += (_, args) => Log.Error("Unhandled UI exception", args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => Log.Error("Unhandled exception", args.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, args) => Log.Error("Unobserved task exception", args.Exception);
+        if (!dummy)
+            _ = Sensors.BluetoothDiagnostics.LogAsync();
+
         _settings = AppSettings.Load();
         _vm = new MainViewModel(_settings, dummy);
 
@@ -121,6 +130,8 @@ public partial class App : Application
         _saveTimer.Stop();
         _vm?.Dispose();
         SaveSettings();
+        Log.Info("=== Exiting ===");
+        Log.Close();
         base.OnExit(e);
     }
 }

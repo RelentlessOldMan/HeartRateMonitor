@@ -111,12 +111,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// <summary>Drop the current connection and try again (also used when auto-connect is off).</summary>
     public void Reconnect()
     {
+        Log.Info("User: reconnect");
         StartSource(force: true);
     }
 
     /// <summary>Forget the remembered strap; the next strap found gets remembered instead.</summary>
     public void ForgetDevice()
     {
+        Log.Info($"User: forget strap {Settings.DeviceName}");
         Settings.DeviceAddress = null;
         Settings.DeviceName = null;
         Reconnect();
