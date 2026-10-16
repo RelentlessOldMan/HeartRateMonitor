@@ -99,6 +99,50 @@
                 </DockPanel>
             </TabItem>
 
+            <!-- ================= Stats ================= -->
+            <TabItem Header="Stats">
+                <DockPanel Margin="10">
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                        <TextBlock Text="{Binding TodayHeader}" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding TodaySummary}" Foreground="#555" Margin="0,4,0,0" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Bottom" Foreground="#555" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Text="Time in zone for today, saved as you go and kept when the app is closed. It starts over at midnight. Time is stored per heart rate, so if you edit your zones the whole day is re-sorted into the new zones." />
+                    <ItemsControl ItemsSource="{Binding ZoneTimes}" VerticalAlignment="Top">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="24" />
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="70" />
+                                        <ColumnDefinition />
+                                        <ColumnDefinition Width="75" />
+                                        <ColumnDefinition Width="45" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="14" Height="14" CornerRadius="2" BorderBrush="#888" BorderThickness="1"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center"
+                                            Background="{Binding Color, Converter={StaticResource HexToBrush}}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Range}" Foreground="#555" VerticalAlignment="Center" />
+                                    <!-- Share of today's tracked time. -->
+                                    <Border Grid.Column="3" Height="16" Background="#EEEEEE" CornerRadius="2" Margin="0,0,10,0">
+                                        <Border Background="{Binding Color, Converter={StaticResource HexToBrush}}" CornerRadius="2"
+                                                RenderTransformOrigin="0,0.5">
+                                            <Border.RenderTransform>
+                                                <ScaleTransform ScaleX="{Binding Fraction}" />
+                                            </Border.RenderTransform>
+                                        </Border>
+                                    </Border>
+                                    <TextBlock Grid.Column="4" Text="{Binding TimeText}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="5" Text="{Binding PercentText}" Foreground="#555" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </DockPanel>
+            </TabItem>
+
             <!-- ================= Overlay ================= -->
             <TabItem Header="Overlay">
                     <StackPanel Margin="10">

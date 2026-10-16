@@ -28,6 +28,7 @@ Run your game in **borderless/windowed** mode. Exclusive fullscreen draws over e
 **Features**
 - Overlay: the number scales with the window. You can choose the font, a fixed color or color by zone, a glow outline, a background color with any opacity, a heart that beats at your actual BPM, the zone name and a live graph of the last 1–30 minutes.
 - Heart rate zones: generated from your max heart rate (50/60/70/80/90%) or fully custom names, thresholds and colors.
+- Daily stats: time in each zone today, kept across restarts. Stored per BPM, so editing your zones re-sorts the whole day.
 - Recording: writes a CSV as you go (timestamp, BPM, RR intervals, skin contact) and optionally a `.tcx` you can upload to Strava or Garmin Connect.
 - Reconnects automatically if the strap drops out. Settings are saved as you change them.
 

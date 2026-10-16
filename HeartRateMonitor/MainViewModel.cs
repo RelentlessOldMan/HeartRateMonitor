@@ -32,6 +32,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         foreach (var zone in Settings.Zones)
             zone.PropertyChanged += OnZoneChanged;
 
+        // Dummy data never touches the real daily stats on disk.
+        if (!IsDummy)
+            _today = DailyStats.Load(_today.Date);
+        UpdateZoneTimes();
+
         _clock = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, (_, _) => Tick(), _dispatcher);
     }
 
@@ -62,6 +67,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     // --- Session stats (since app start or last reset) ---
     private string _statsText = "";
     public string StatsText { get => _statsText; private set => SetField(ref _statsText, value); }
+
+    // --- Today's time in each zone ---
+    /// <summary>How often today's stats are written to disk while data is coming in (they're also saved on exit).</summary>
+    private static readonly TimeSpan StatsSaveInterval = TimeSpan.FromSeconds(30);
+    private DailyStats _today = new() { Date = DateOnly.FromDateTime(DateTime.Now) };
+    private HeartRateSample? _lastTrackedSample;
+    private DateTime _lastStatsSave = DateTime.Now;
+    private IReadOnlyList<ZoneTime> _zoneTimes = [];
+    private string _todayHeader = "";
+    private string _todaySummary = "";
+
+    public IReadOnlyList<ZoneTime> ZoneTimes { get => _zoneTimes; private set => SetField(ref _zoneTimes, value); }
+    public string TodayHeader { get => _todayHeader; private set => SetField(ref _todayHeader, value); }
+    public string TodaySummary { get => _todaySummary; private set => SetField(ref _todaySummary, value); }
 
     // --- Recording ---
     private string _recordingText = "Not recording";
@@ -133,6 +152,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IsStale = false;
         RefreshColor();
         UpdateStats();
+        TrackDaily(sample);
     }
 
     private void Tick()
@@ -141,6 +161,97 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RefreshColor();
         if (_recorder is not null)
             RecordingText = $"Recording {DateTime.Now - _recorder.Start:hh\\:mm\\:ss}";
+
+        // Roll over at midnight even if no data is coming in.
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (today != _today.Date)
+            SwitchDay(today);
+        if (_today.IsDirty && DateTime.Now - _lastStatsSave >= StatsSaveInterval)
+            SaveDailyStats();
+    }
+
+    /// <summary>
+    /// Credits the time since the previous sample to this sample's BPM. Gaps longer than
+    /// <see cref="StaleAfter"/> (strap off, out of range, app closed) aren't counted.
+    /// </summary>
+    private void TrackDaily(HeartRateSample sample)
+    {
+        var previous = _lastTrackedSample;
+        // No skin contact means the BPM is meaningless.
+        if (sample.SensorContact == false || sample.Bpm <= 0)
+        {
+            _lastTrackedSample = null;
+            return;
+        }
+        _lastTrackedSample = sample;
+        if (previous is null)
+            return;
+
+        double seconds = (sample.Time - previous.Time).TotalSeconds;
+        if (seconds <= 0 || seconds > StaleAfter.TotalSeconds)
+            return;
+
+        var day = DateOnly.FromDateTime(sample.Time);
+        if (day != _today.Date)
+            SwitchDay(day);
+        _today.Add(sample.Bpm, seconds);
+        UpdateZoneTimes();
+    }
+
+    private void SwitchDay(DateOnly day)
+    {
+        SaveDailyStats();
+        Log.Info($"Daily stats: new day {day:yyyy-MM-dd}");
+        _today = IsDummy ? new DailyStats { Date = day } : DailyStats.Load(day);
+        UpdateZoneTimes();
+    }
+
+    private void SaveDailyStats()
+    {
+        _lastStatsSave = DateTime.Now;
+        if (IsDummy || !_today.IsDirty)
+            return;
+        try
+        {
+            _today.Save();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Couldn't save daily stats", ex);
+        }
+    }
+
+    /// <summary>Sorts today's time-per-BPM into the current zones.</summary>
+    private void UpdateZoneTimes()
+    {
+        TodayHeader = $"Today, {_today.Date:dddd d MMMM}";
+        var zones = Settings.Zones.OrderBy(z => z.MinBpm).ToList();
+        var seconds = new double[zones.Count + 1]; // [0] = below the lowest zone
+        double total = 0, weightedBpm = 0;
+        foreach (var (bpm, s) in _today.SecondsByBpm)
+        {
+            int zone = zones.FindLastIndex(z => z.MinBpm <= bpm);
+            seconds[zone + 1] += s;
+            total += s;
+            weightedBpm += bpm * s;
+        }
+
+        var rows = new List<ZoneTime>();
+        double Fraction(double s) => total > 0 ? s / total : 0;
+        // Only show "below zones" when there's time in it, so the list doesn't open with an empty row.
+        if (seconds[0] > 0 || zones.Count == 0)
+            rows.Add(new ZoneTime(zones.Count > 0 ? "Below zones" : "No zones", Settings.FixedColor,
+                zones.Count > 0 ? $"< {zones[0].MinBpm}" : "", TimeSpan.FromSeconds(seconds[0]), Fraction(seconds[0])));
+        for (int i = 0; i < zones.Count; i++)
+        {
+            string range = i + 1 < zones.Count ? $"{zones[i].MinBpm}–{zones[i + 1].MinBpm - 1}" : $"{zones[i].MinBpm}+";
+            rows.Add(new ZoneTime(zones[i].Name, zones[i].Color, range, TimeSpan.FromSeconds(seconds[i + 1]), Fraction(seconds[i + 1])));
+        }
+        ZoneTimes = rows;
+
+        TodaySummary = total > 0
+            ? $"Tracked {ZoneTime.FormatDuration(TimeSpan.FromSeconds(total))}   Avg {weightedBpm / total:0}   Max {_today.SecondsByBpm.Keys.Max()}"
+            : "No heart rate data yet today";
     }
 
     private void RefreshColor()
@@ -193,7 +304,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AppSettings.ColorMode) or nameof(AppSettings.FixedColor))
+        {
             RefreshColor();
+            UpdateZoneTimes();
+        }
         else if (e.PropertyName is nameof(AppSettings.AutoConnect) && Settings.AutoConnect && State == SourceState.Idle)
             Reconnect();
     }
@@ -205,13 +319,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         foreach (HeartRateZone zone in e.NewItems ?? Array.Empty<HeartRateZone>())
             zone.PropertyChanged += OnZoneChanged;
         RefreshColor();
+        UpdateZoneTimes();
     }
 
-    private void OnZoneChanged(object? sender, PropertyChangedEventArgs e) => RefreshColor();
+    private void OnZoneChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        RefreshColor();
+        UpdateZoneTimes();
+    }
 
     public void Dispose()
     {
         _clock.Stop();
+        SaveDailyStats();
         StopRecording();
         _source?.Dispose();
     }
