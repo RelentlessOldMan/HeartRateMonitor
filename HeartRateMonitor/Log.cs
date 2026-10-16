@@ -62,27 +62,6 @@ public static class Log
         }
     }
 
-    /// <summary>The current log (preceded by the previous one if it's short), for copying to the clipboard.</summary>
-    public static string ReadAll()
-    {
-        lock (Gate)
-        {
-            var text = new StringBuilder();
-            if (File.Exists(FilePath) && new FileInfo(FilePath).Length < 64 * 1024 && File.Exists(PreviousFilePath))
-                text.Append(ReadShared(PreviousFilePath));
-            if (File.Exists(FilePath))
-                text.Append(ReadShared(FilePath));
-            return text.ToString();
-        }
-    }
-
-    private static string ReadShared(string path)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
-
     public static void Close()
     {
         lock (Gate)

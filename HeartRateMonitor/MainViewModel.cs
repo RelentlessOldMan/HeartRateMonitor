@@ -66,8 +66,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string BatteryText => BatteryLevel is { } b ? $"{b}%" : "–";
 
     // --- Session stats (since app start or last reset) ---
-    private string _statsText = "";
-    public string StatsText { get => _statsText; private set => SetField(ref _statsText, value); }
+    private string _strapStatsText = "", _calculatedStatsText = "", _sessionTimeText = "";
+    public string StrapStatsText { get => _strapStatsText; private set => SetField(ref _strapStatsText, value); }
+    public string CalculatedStatsText { get => _calculatedStatsText; private set => SetField(ref _calculatedStatsText, value); }
+    public string SessionTimeText { get => _sessionTimeText; private set => SetField(ref _sessionTimeText, value); }
 
     // --- Today's time in each zone ---
     /// <summary>How often today's stats are written to disk while data is coming in (they're also saved on exit).</summary>
@@ -267,13 +269,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateStats()
     {
-        if (Samples.Count == 0)
-        {
-            StatsText = "No data yet";
-            return;
-        }
-        var duration = Samples[^1].Time - Samples[0].Time;
-        StatsText = $"Avg {Samples.Average(s => s.Bpm):0}   Min {Samples.Min(s => s.Bpm)}   Max {Samples.Max(s => s.Bpm)}   Time {duration:hh\\:mm\\:ss}";
+        static string Summary(IReadOnlyCollection<int> bpms) => bpms.Count == 0
+            ? "No data yet"
+            : $"Avg {bpms.Average():0}   Min {bpms.Min()}   Max {bpms.Max()}";
+
+        StrapStatsText = Summary(Samples.Select(s => s.Bpm).ToList());
+        CalculatedStatsText = Summary(Samples.Where(s => s.CalculatedBpm is not null).Select(s => s.CalculatedBpm!.Value).ToList());
+        SessionTimeText = Samples.Count == 0 ? "" : $"Time {Samples[^1].Time - Samples[0].Time:hh\\:mm\\:ss}";
     }
 
     public void ResetSession()

@@ -92,7 +92,19 @@
                         </StackPanel>
                         <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
                             <TextBlock Text="{Binding MainLead.ZoneName}" FontSize="18" />
-                            <TextBlock Text="{Binding StatsText}" Foreground="#555" Margin="0,4,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                        Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Strap}">
+                                <TextBlock Text="Strap" Width="75" FontWeight="SemiBold" Foreground="#555"
+                                           Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                                <TextBlock Text="{Binding StrapStatsText}" Foreground="#555" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                        Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Calculated}">
+                                <TextBlock Text="From beats" Width="75" FontWeight="SemiBold" Foreground="#555"
+                                           Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+                                <TextBlock Text="{Binding CalculatedStatsText}" Foreground="#555" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding SessionTimeText}" Foreground="#555" Margin="0,4,0,0" />
                         </StackPanel>
                     </DockPanel>
 
@@ -359,9 +371,8 @@
                     <GroupBox Header="Troubleshooting">
                         <StackPanel>
                             <TextBlock Foreground="#555" TextWrapping="Wrap"
-                                       Text="The app keeps a log of what the strap connection is doing. If something goes wrong, copy the log and send it along." />
+                                       Text="The app keeps a log of what the strap connection is doing. If something goes wrong, open the log folder and send the log file along." />
                             <UniformGrid Rows="1" HorizontalAlignment="Left" Margin="0,6,0,0">
-                                <Button Content="Copy log" Click="CopyLog_Click" ToolTip="Copy the connection log to the clipboard" />
                                 <Button Content="Open log folder" Click="OpenLogFolder_Click" />
                             </UniformGrid>
                         </StackPanel>

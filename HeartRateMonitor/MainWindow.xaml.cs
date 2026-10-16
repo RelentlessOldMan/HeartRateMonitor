@@ -134,19 +134,6 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo(Directory.CreateDirectory(Log.Folder).FullName) { UseShellExecute = true });
     }
 
-    private void CopyLog_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Clipboard.SetText(Log.ReadAll());
-            MessageBox.Show(this, "The log is on the clipboard, ready to paste.", "Copy log", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, $"Couldn't copy the log: {ex.Message}", "Copy log", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
     // --- Helpers ---
 
     private void PickColor(string current, Action<string> apply)
