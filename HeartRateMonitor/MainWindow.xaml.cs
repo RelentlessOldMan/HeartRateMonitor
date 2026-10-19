@@ -21,11 +21,6 @@ public partial class MainWindow : Window
         DataContext = vm;
         InitializeComponent();
         FontCombo.ItemsSource = Fonts.SystemFontFamilies.OrderBy(f => f.Source).ToList();
-        _vm.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(MainViewModel.IsRecording))
-                RecordButton.Content = _vm.IsRecording ? "■ Stop recording" : "● Start recording";
-        };
         Title += $" v{AppVersion}";
         if (vm.IsDummy)
             Title += " (dummy data)";
@@ -47,18 +42,18 @@ public partial class MainWindow : Window
 
     // --- Live tab ---
 
-    private void Record_Click(object sender, RoutedEventArgs e)
+    private void Save_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            if (_vm.IsRecording)
-                _vm.StopRecording();
-            else
-                _vm.StartRecording();
+            if (_vm.SaveRecording().Count == 0)
+                MessageBox.Show(this, "Nothing recorded yet, so there's nothing to save.", "Save recording",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Recording", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, $"Couldn't save the recording: {ex.Message}\n\nIt's kept and will be recovered into the recordings folder next time the app starts.",
+                "Save recording", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -68,7 +63,19 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo(_vm.Settings.RecordingFolder) { UseShellExecute = true });
     }
 
-    private void ResetSession_Click(object sender, RoutedEventArgs e) => _vm.ResetSession();
+    private void ResetSession_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.HasUnsavedRecording ||
+            MessageBox.Show(this, "Throw away the unsaved recording and start a new one?", "Reset",
+                MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+            _vm.ResetSession();
+    }
+
+    private void OpenEventInbox_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(AppSettings.EventInboxFolder);
+        Process.Start(new ProcessStartInfo(AppSettings.EventInboxFolder) { UseShellExecute = true });
+    }
 
     // --- Overlay tab ---
 
@@ -159,11 +166,29 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (_vm.IsRecording &&
-            MessageBox.Show(this, "A recording is in progress. Stop it and quit?", "Heart Rate Monitor",
-                MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        if (_vm.HasUnsavedRecording)
         {
-            e.Cancel = true;
+            switch (MessageBox.Show(this, "Save this session's recording before quitting?", "Heart Rate Monitor",
+                        MessageBoxButton.YesNoCancel, MessageBoxImage.Question))
+            {
+                case MessageBoxResult.Yes:
+                    try
+                    {
+                        _vm.SaveRecording(startNew: false);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, $"Couldn't save the recording: {ex.Message}\n\nIt's kept and will be recovered into the recordings folder next time the app starts.",
+                            "Save recording", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    break;
+                case MessageBoxResult.No:
+                    _vm.DiscardRecording();
+                    break;
+                default:
+                    e.Cancel = true;
+                    break;
+            }
         }
         base.OnClosing(e);
     }

@@ -1,22 +1,29 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
+using HeartRateMonitor.Events;
 using HeartRateMonitor.Models;
 
 namespace HeartRateMonitor.Recording;
 
 /// <summary>
-/// Writes a CSV as samples arrive (so a crash loses nothing) and optionally a TCX file
-/// (importable by Strava, Garmin Connect, etc.) when the recording stops.
+/// Writes a CSV as samples arrive (so a crash loses nothing) into a scratch folder.
+/// <see cref="Save"/> moves it to the recordings folder, optionally with a TCX file
+/// (importable by Strava, Garmin Connect, etc.); <see cref="Discard"/> throws it away.
 /// </summary>
 public sealed class SessionRecorder : IDisposable
 {
     private readonly StreamWriter _csv;
+    private StreamWriter? _events;
     private readonly List<HeartRateSample> _samples = [];
     private readonly DateTime _start;
+    private bool _closed;
 
     public string CsvPath { get; }
     public DateTime Start => _start;
+    public int SampleCount => _samples.Count;
 
     public SessionRecorder(string folder)
     {
@@ -39,18 +46,88 @@ public sealed class SessionRecorder : IDisposable
         _csv.Flush();
     }
 
-    /// <summary>Finishes the recording. Returns the files written.</summary>
-    public IReadOnlyList<string> Stop(bool writeTcx)
+    /// <summary>
+    /// Appends an event to the <c>.events.jsonl</c> sidecar: one line per event, the JSON exactly as received
+    /// plus <c>"received"</c>, the time the app stamped it with (what its spans are measured against).
+    /// </summary>
+    public void AddEvent(AppEvent e)
     {
-        _csv.Dispose();
-        var files = new List<string> { CsvPath };
-        if (writeTcx && _samples.Count > 0)
+        if (_closed)
+            return;
+        _events ??= new StreamWriter(Path.ChangeExtension(CsvPath, ".events.jsonl"), append: true, new UTF8Encoding(false));
+        var line = (JsonObject)e.Json.DeepClone();
+        line["received"] = e.Time.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture);
+        _events.WriteLine(line.ToJsonString());
+        _events.Flush();
+    }
+
+    /// <summary>Writes the <c>.spans.csv</c> summary: one row per song/course/… with heart rate stats.</summary>
+    public void WriteSpans(IReadOnlyCollection<EventSpan> spans)
+    {
+        if (spans.Count == 0)
+            return;
+        var inv = CultureInfo.InvariantCulture;
+        static string Csv(string? s) => s is null ? "" : s.IndexOfAny([',', '"', '\n', '\r']) >= 0 ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
+        string? DataField(EventSpan s, string name) => s.BeginEvent.Data?[name]?.ToString();
+        // The first player's chart, if the source sent players (StepMania does); handy for filtering in a spreadsheet.
+        string? PlayerField(EventSpan s, string name) => (s.BeginEvent.Data?["players"] as JsonArray)?.FirstOrDefault()?[name]?.ToString();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("id,parent,type,source,label,start,end,duration_s,result,avg_bpm,min_bpm,max_bpm,title,artist,pack,difficulty,meter,data");
+        foreach (var s in spans.OrderBy(s => s.Start))
         {
-            string tcxPath = Path.ChangeExtension(CsvPath, ".tcx");
-            WriteTcx(tcxPath);
-            files.Add(tcxPath);
+            double? duration = s.End is { } end ? (end - s.Start).TotalSeconds : null;
+            sb.AppendLine(string.Join(",",
+                Csv(s.Id), Csv(s.Parent), Csv(s.Type), Csv(s.Source), Csv(s.Label),
+                s.Start.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", inv),
+                s.End?.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", inv) ?? "",
+                duration?.ToString("0.0", inv) ?? "",
+                Csv(s.Result ?? (s.IsOpen ? "in progress" : null)),
+                s.AvgBpm?.ToString(inv) ?? "", s.MinBpm?.ToString(inv) ?? "", s.MaxBpm?.ToString(inv) ?? "",
+                Csv(DataField(s, "title")), Csv(DataField(s, "artist")), Csv(DataField(s, "pack")),
+                Csv(PlayerField(s, "difficulty")), Csv(PlayerField(s, "meter")),
+                Csv(s.BeginEvent.Data?.ToJsonString())));
         }
-        return files;
+        File.WriteAllText(Path.ChangeExtension(CsvPath, ".spans.csv"), sb.ToString(), new UTF8Encoding(false));
+    }
+
+    /// <summary>Finishes the recording and moves its files into <paramref name="folder"/>. Returns the files' new paths.</summary>
+    public IReadOnlyList<string> Save(string folder, bool writeTcx)
+    {
+        Close();
+        if (writeTcx && _samples.Count > 0)
+            WriteTcx(Path.ChangeExtension(CsvPath, ".tcx"));
+
+        Directory.CreateDirectory(folder);
+        var saved = new List<string>();
+        foreach (var file in OwnFiles(CsvPath))
+        {
+            string target = Path.Combine(folder, Path.GetFileName(file));
+            File.Move(file, target, overwrite: true);
+            saved.Add(target);
+        }
+        return saved;
+    }
+
+    /// <summary>Finishes the recording and deletes its files.</summary>
+    public void Discard()
+    {
+        Close();
+        foreach (var file in OwnFiles(CsvPath))
+            File.Delete(file);
+    }
+
+    /// <summary>The CSV and every sidecar file named after it (.tcx, .events.jsonl, …).</summary>
+    public static IEnumerable<string> OwnFiles(string csvPath) =>
+        Directory.EnumerateFiles(Path.GetDirectoryName(csvPath)!, Path.GetFileNameWithoutExtension(csvPath) + ".*").ToList();
+
+    private void Close()
+    {
+        if (_closed)
+            return;
+        _closed = true;
+        _csv.Dispose();
+        _events?.Dispose();
     }
 
     private void WriteTcx(string path)
@@ -83,5 +160,6 @@ public sealed class SessionRecorder : IDisposable
         doc.Save(path);
     }
 
-    public void Dispose() => _csv.Dispose();
+    /// <summary>Closes the files but leaves them in the scratch folder, to be recovered on the next start.</summary>
+    public void Dispose() => Close();
 }

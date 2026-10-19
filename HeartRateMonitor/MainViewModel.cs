@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows.Threading;
+using HeartRateMonitor.Events;
 using HeartRateMonitor.Models;
 using HeartRateMonitor.Recording;
 using HeartRateMonitor.Sensors;
@@ -17,11 +18,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _clock;
     private IHeartRateSource? _source;
     private SessionRecorder? _recorder;
+    private readonly SpanTracker _spans = new();
+    private EventInbox? _inbox;
     private DateTime _lastSampleTime = DateTime.MinValue;
 
     public AppSettings Settings { get; }
     public bool IsDummy { get; }
     public ObservableCollection<HeartRateSample> Samples { get; } = [];
+    /// <summary>Songs, courses, … reported by other programs this session (see <see cref="EventInbox"/>).</summary>
+    public ObservableCollection<EventSpan> Spans => _spans.Spans;
 
     public MainViewModel(AppSettings settings, bool dummy)
     {
@@ -87,12 +92,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     // --- Recording ---
     private string _recordingText = "Not recording";
-    public bool IsRecording => _recorder is not null;
     public string RecordingText { get => _recordingText; private set => SetField(ref _recordingText, value); }
 
     public void Start()
     {
+        RecoverUnsavedRecordings();
+        StartRecording();
         StartSource(force: false);
+        StartEventInbox();
         _clock.Start();
         Tick();
     }
@@ -160,6 +167,36 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RefreshReadings();
         UpdateStats();
         TrackDaily(sample);
+        foreach (var span in Spans)
+            if (span.IsOpen)
+                span.UpdateStats(Samples);
+    }
+
+    // --- Events from other programs ---
+    private void StartEventInbox()
+    {
+        var builtIn = AppSettings.EventInboxFolder;
+        try
+        {
+            Directory.CreateDirectory(builtIn);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Couldn't create the event inbox {builtIn}: {ex.Message}");
+        }
+        _inbox = new EventInbox(() => [builtIn, .. Settings.EventFolders.Where(f => !string.Equals(f, builtIn, StringComparison.OrdinalIgnoreCase))]);
+        _inbox.EventReceived += OnEvent;
+        _inbox.Start();
+    }
+
+    internal void OnEvent(AppEvent e)
+    {
+        _recorder?.AddEvent(e);
+        var span = _spans.Apply(e);
+        // Closing a span can close others (its children, or a stale one), so refresh every span that just ended.
+        foreach (var s in Spans)
+            if (s == span || s.End >= e.Time)
+                s.UpdateStats(Samples);
     }
 
     private void Tick()
@@ -167,7 +204,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IsStale = DateTime.Now - _lastSampleTime > StaleAfter;
         RefreshReadings();
         if (_recorder is not null)
-            RecordingText = $"Recording {DateTime.Now - _recorder.Start:hh\\:mm\\:ss}";
+            RecordingText = $"● Recording {DateTime.Now - _recorder.Start:hh\\:mm\\:ss}, not saved yet" +
+                            (_savedText.Length > 0 ? $"  ({_savedText})" : "");
 
         // Roll over at midnight even if no data is coming in.
         var today = DateOnly.FromDateTime(DateTime.Now);
@@ -278,31 +316,124 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SessionTimeText = Samples.Count == 0 ? "" : $"Time {Samples[^1].Time - Samples[0].Time:hh\\:mm\\:ss}";
     }
 
+    /// <summary>Clears the graph and stats and throws away the unsaved recording, starting a fresh one.</summary>
     public void ResetSession()
     {
+        Log.Info($"User: reset session ({_recorder?.SampleCount ?? 0} unsaved samples discarded)");
         Samples.Clear();
+        Spans.Clear();
         UpdateStats();
+        DiscardRecording();
+        _savedText = "";
+        StartRecording();
     }
 
-    public void StartRecording()
+    /// <summary>
+    /// The current session is always being recorded, into a scratch folder until it's saved.
+    /// Whatever's left there from a crash is moved into the recordings folder instead.
+    /// </summary>
+    private string ScratchFolder => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeartRateMonitor",
+        IsDummy ? "UnsavedRecording-dummy" : "UnsavedRecording");
+
+    private string _savedText = "";
+
+    /// <summary>True when there's recorded data that would be lost if the app quit without saving.</summary>
+    public bool HasUnsavedRecording => _recorder is { SampleCount: > 0 };
+
+    private void StartRecording()
     {
-        if (_recorder is not null)
-            return;
-        _recorder = new SessionRecorder(Settings.RecordingFolder);
-        OnPropertyChanged(nameof(IsRecording));
+        try
+        {
+            _recorder = new SessionRecorder(ScratchFolder);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Couldn't start recording", ex);
+            _recorder = null;
+            RecordingText = $"Not recording: {ex.Message}";
+        }
+        OnPropertyChanged(nameof(HasUnsavedRecording));
         Tick();
     }
 
-    /// <summary>Returns the files written.</summary>
-    public IReadOnlyList<string> StopRecording()
+    /// <summary>Saves the recording so far into the recordings folder and starts a new one. Returns the files written.</summary>
+    public IReadOnlyList<string> SaveRecording(bool startNew = true)
     {
-        if (_recorder is null)
+        var recorder = _recorder;
+        if (recorder is null)
             return [];
-        var files = _recorder.Stop(Settings.WriteTcx);
         _recorder = null;
-        OnPropertyChanged(nameof(IsRecording));
-        RecordingText = $"Saved {Path.GetFileName(files[0])}";
-        return files;
+        try
+        {
+            if (recorder.SampleCount == 0)
+            {
+                recorder.Discard();
+                return [];
+            }
+            // Spans that overlap this recording; ones still going are written as "in progress".
+            var saveTime = DateTime.Now;
+            recorder.WriteSpans(Spans.Where(s => s.Start < saveTime && (s.End ?? DateTime.MaxValue) >= recorder.Start).ToList());
+            // If this throws, the files stay in the scratch folder and are recovered on the next start.
+            var files = recorder.Save(Settings.RecordingFolder, Settings.WriteTcx);
+            Log.Info($"Recording saved: {string.Join(", ", files.Select(Path.GetFileName))}");
+            _savedText = $"saved {Path.GetFileName(files[0])}";
+            return files;
+        }
+        finally
+        {
+            if (startNew)
+                StartRecording();
+        }
+    }
+
+    /// <summary>Throws away the unsaved recording without starting a new one.</summary>
+    public void DiscardRecording()
+    {
+        try
+        {
+            _recorder?.Discard();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Couldn't delete the unsaved recording", ex);
+        }
+        _recorder = null;
+        OnPropertyChanged(nameof(HasUnsavedRecording));
+    }
+
+    /// <summary>Moves recordings left in the scratch folder by a crash into the recordings folder.</summary>
+    private void RecoverUnsavedRecordings()
+    {
+        if (IsDummy || !Directory.Exists(ScratchFolder))
+            return;
+        foreach (var csv in Directory.GetFiles(ScratchFolder, "*.csv"))
+        {
+            try
+            {
+                // Just the header line: nothing worth keeping.
+                if (File.ReadLines(csv).Skip(1).Any())
+                {
+                    Directory.CreateDirectory(Settings.RecordingFolder);
+                    foreach (var file in SessionRecorder.OwnFiles(csv))
+                    {
+                        string name = Path.GetFileNameWithoutExtension(csv) + "_recovered" + Path.GetFileName(file)[Path.GetFileNameWithoutExtension(csv).Length..];
+                        File.Move(file, Path.Combine(Settings.RecordingFolder, name), overwrite: true);
+                    }
+                    Log.Warn($"Recovered unsaved recording {Path.GetFileName(csv)}");
+                    _savedText = "recovered an unsaved recording from last time";
+                }
+                else
+                {
+                    foreach (var file in SessionRecorder.OwnFiles(csv))
+                        File.Delete(file);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Couldn't recover {csv}", ex);
+            }
+        }
     }
 
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)
@@ -339,8 +470,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _clock.Stop();
+        _inbox?.Dispose();
         SaveDailyStats();
-        StopRecording();
+        // Closes the file but keeps it: anything not saved or discarded by now is recovered next start.
+        _recorder?.Dispose();
         _source?.Dispose();
     }
 }

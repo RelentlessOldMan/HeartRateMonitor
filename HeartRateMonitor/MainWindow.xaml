@@ -110,15 +110,17 @@
 
                     <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
                         <UniformGrid DockPanel.Dock="Left" Rows="1">
-                            <Button x:Name="RecordButton" Content="● Start recording" Click="Record_Click" />
+                            <Button Content="Save recording" Click="Save_Click"
+                                    ToolTip="Save the session so far to the recordings folder and keep recording into a new one" />
                             <Button Content="Open folder" Click="OpenFolder_Click" />
-                            <Button Content="Reset graph" Click="ResetSession_Click" />
+                            <Button Content="Reset" Click="ResetSession_Click"
+                                    ToolTip="Clear the graph and throw away the unsaved recording" />
                         </UniformGrid>
                         <TextBlock Text="{Binding RecordingText}" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" />
                     </DockPanel>
 
                     <Border BorderBrush="#CCC" BorderThickness="1" Background="#1E1E1E" Margin="0,8,0,0">
-                        <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}"
+                        <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}" Spans="{Binding Spans}"
                                           ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF"
                                           Display="{Binding Settings.MainDisplay}" />
                     </Border>
@@ -166,6 +168,36 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ================= Events ================= -->
+            <TabItem Header="Events">
+                <DockPanel Margin="10">
+                    <TextBlock DockPanel.Dock="Bottom" Foreground="#555" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Text="Songs and other events other programs (like StepMania with the Simply Love heart rate module) report while you play, with your heart rate during each. They're saved with the recording: a .events.jsonl file with everything received, and a .spans.csv summary to open in a spreadsheet." />
+                    <DataGrid ItemsSource="{Binding Spans}" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserSortColumns="False" HeadersVisibility="Column" SelectionMode="Single"
+                              Background="White" BorderBrush="#CCCCCC" BorderThickness="1"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E0E0E0">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Padding" Value="6,5" />
+                                <Setter Property="Background" Value="#F5F5F5" />
+                                <Setter Property="BorderBrush" Value="#E0E0E0" />
+                                <Setter Property="BorderThickness" Value="0,0,1,1" />
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Start" Width="65" Binding="{Binding StartText}" />
+                            <DataGridTextColumn Header="What" Width="*" Binding="{Binding DisplayLabel}" />
+                            <DataGridTextColumn Header="Time" Width="55" Binding="{Binding DurationText}" />
+                            <DataGridTextColumn Header="Avg" Width="45" Binding="{Binding AvgBpm}" FontWeight="SemiBold" />
+                            <DataGridTextColumn Header="Max" Width="45" Binding="{Binding MaxBpm}" />
+                            <DataGridTextColumn Header="Min" Width="45" Binding="{Binding MinBpm}" />
+                            <DataGridTextColumn Header="Result" Width="80" Binding="{Binding Result}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
                 </DockPanel>
             </TabItem>
 
@@ -337,6 +369,7 @@
 
             <!-- ================= Settings ================= -->
             <TabItem Header="Settings">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="10">
                     <GroupBox Header="Strap">
                         <StackPanel>
@@ -368,6 +401,17 @@
                             <CheckBox Content="Also save a .tcx file (for Strava, Garmin Connect, etc.)" IsChecked="{Binding Settings.WriteTcx}" Margin="0,6,0,0" />
                         </StackPanel>
                     </GroupBox>
+                    <GroupBox Header="Events from other programs">
+                        <StackPanel>
+                            <TextBlock Foreground="#555" TextWrapping="Wrap"
+                                       Text="Folders to pick up event files from (one per line). Programs drop one small .json file per event and the app reads and deletes it. The app's own inbox folder is always watched too." />
+                            <TextBox Text="{Binding Settings.EventFoldersText, UpdateSourceTrigger=LostFocus}" AcceptsReturn="True"
+                                     Height="54" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,6,0,0" />
+                            <UniformGrid Rows="1" HorizontalAlignment="Left" Margin="0,6,0,0">
+                                <Button Content="Open inbox folder" Click="OpenEventInbox_Click" />
+                            </UniformGrid>
+                        </StackPanel>
+                    </GroupBox>
                     <GroupBox Header="Troubleshooting">
                         <StackPanel>
                             <TextBlock Foreground="#555" TextWrapping="Wrap"
@@ -378,6 +422,7 @@
                         </StackPanel>
                     </GroupBox>
                 </StackPanel>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </DockPanel>

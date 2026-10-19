@@ -86,6 +86,32 @@ public sealed class AppSettings : ObservableObject
     public string RecordingFolder { get => _recordingFolder; set => SetField(ref _recordingFolder, value); }
     public bool WriteTcx { get => _writeTcx; set => SetField(ref _writeTcx, value); }
 
+    // --- Events from other programs ---
+    /// <summary>Always watched, whatever <see cref="EventFolders"/> says.</summary>
+    public static string EventInboxFolder { get; } = Path.Combine(SettingsFolder, "inbox");
+
+    private List<string> _eventFolders =
+    [
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "StepMania 5.1", "Save", "HeartRate", "events"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ITGmania", "Save", "HeartRate", "events"),
+    ];
+
+    /// <summary>Extra folders to pick event files up from (besides <see cref="EventInboxFolder"/>). Missing folders are fine.</summary>
+    public List<string> EventFolders
+    {
+        get => _eventFolders;
+        set { if (SetField(ref _eventFolders, value)) OnPropertyChanged(nameof(EventFoldersText)); }
+    }
+
+    /// <summary><see cref="EventFolders"/> one per line, for editing in a text box.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string EventFoldersText
+    {
+        get => string.Join(Environment.NewLine, _eventFolders);
+        set => EventFolders = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public static AppSettings Load()
     {
         AppSettings? settings = null;

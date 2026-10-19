@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using HeartRateMonitor.Events;
 using HeartRateMonitor.Models;
 
 namespace HeartRateMonitor.Controls;
@@ -51,6 +52,12 @@ public sealed class HeartRateGraph : FrameworkElement
         nameof(Display), typeof(HeartRateDisplay), typeof(HeartRateGraph),
         new FrameworkPropertyMetadata(HeartRateDisplay.Strap, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty SpansProperty = DependencyProperty.Register(
+        nameof(Spans), typeof(IList<EventSpan>), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnCollectionChanged));
+
+    /// <summary>Songs etc. to shade behind the line. Only the innermost ones are drawn (songs, not the course around them).</summary>
+    public IList<EventSpan>? Spans { get => (IList<EventSpan>?)GetValue(SpansProperty); set => SetValue(SpansProperty, value); }
     public IList<HeartRateSample>? Samples { get => (IList<HeartRateSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
     public IEnumerable<HeartRateZone>? Zones { get => (IEnumerable<HeartRateZone>?)GetValue(ZonesProperty); set => SetValue(ZonesProperty, value); }
     /// <summary>Show only the last N minutes, scrolling. 0 = the whole session.</summary>
@@ -149,6 +156,32 @@ public sealed class HeartRateGraph : FrameworkElement
                     continue;
                 var brush = BrushCache.Get(zones[i].Color, alpha: 0x38);
                 dc.DrawRectangle(brush, null, new Rect(0, Y(bandHi), width, Y(bandLo) - Y(bandHi)));
+            }
+        }
+
+        if (Spans is { Count: > 0 } spans)
+        {
+            var bandBrush = BrushCache.Get("#FFFFFF", alpha: 0x16);
+            var edgePen = BrushCache.GetPen("#555555", 1);
+            var textBrush = BrushCache.Get("#AAAAAA");
+            double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            var parents = spans.Select(s => s.Parent).Where(p => p is not null).ToHashSet();
+            foreach (var span in spans)
+            {
+                if (parents.Contains(span.Id))
+                    continue;
+                double x0 = Math.Max(X(span.Start), 0), x1 = Math.Min(X(span.End ?? samples[^1].Time), width);
+                if (x1 <= 0 || x0 >= width || x1 <= x0)
+                    continue;
+                dc.DrawRectangle(bandBrush, null, new Rect(x0, 0, x1 - x0, height));
+                dc.DrawLine(edgePen, new Point(x0, 0), new Point(x0, height));
+                if (ShowLabels && x1 - x0 > 30)
+                {
+                    var text = new FormattedText(span.Label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                        new Typeface("Segoe UI"), 10, textBrush, dpi)
+                    { MaxTextWidth = x1 - x0 - 6, MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
+                    dc.DrawText(text, new Point(x0 + 3, height - text.Height - 16));
+                }
             }
         }
 

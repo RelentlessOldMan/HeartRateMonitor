@@ -28,6 +28,18 @@ public static class Snapshot
         for (int i = 0; i < 600; i++)
             vm.OnSample(dummy.Next(start.AddSeconds(i)));
 
+        // A few songs, as the Simply Love module would report them: two singles, then a two-song course still going.
+        void Send(int second, string json) =>
+            vm.OnEvent(Events.AppEvent.Parse(json, start.AddSeconds(second), out _)!);
+        Send(30, """{"kind":"begin","type":"song","id":"s1","source":"simply-love","label":"Acme Songo Wongo [Hard 7]","data":{"title":"Acme Songo Wongo","players":[{"player":"P1","difficulty":"Hard","meter":7}]}}""");
+        Send(140, """{"kind":"end","type":"song","id":"s1","source":"simply-love","data":{"result":"cleared"}}""");
+        Send(170, """{"kind":"begin","type":"song","id":"s2","source":"simply-love","label":"Stamina Thing [Challenge 12]"}""");
+        Send(300, """{"kind":"end","type":"song","id":"s2","source":"simply-love","data":{"result":"failed"}}""");
+        Send(330, """{"kind":"begin","type":"course","id":"c1","source":"simply-love","label":"Some Course [Medium]"}""");
+        Send(330, """{"kind":"begin","type":"song","id":"c1s1","parent":"c1","source":"simply-love","label":"First Course Song"}""");
+        Send(450, """{"kind":"end","type":"song","id":"c1s1","source":"simply-love","data":{"result":"cleared"}}""");
+        Send(452, """{"kind":"begin","type":"song","id":"c1s2","parent":"c1","source":"simply-love","label":"Second Course Song"}""");
+
         // Steal the windows' content and lay it out on its own; the windows themselves are never shown.
         var main = new MainWindow(vm);
         var mainContent = (FrameworkElement)main.Content;

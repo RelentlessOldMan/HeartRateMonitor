@@ -30,7 +30,8 @@ Run your game in **borderless/windowed** mode. Exclusive fullscreen draws over e
 - Two heart rates: the strap's own number and one calculated from the beat-to-beat (RR) intervals, which is more trustworthy when the strap's number looks off. Show either or both, separately for the main window and the overlay. With both, the graph draws the calculated line in cyan.
 - Heart rate zones: generated from your max heart rate (50/60/70/80/90%) or fully custom names, thresholds and colors.
 - Daily stats: time in each zone today, kept across restarts. Stored per BPM, so editing your zones re-sorts the whole day.
-- Recording: writes a CSV as you go (timestamp, BPM, RR intervals, skin contact, calculated BPM) and optionally a `.tcx` you can upload to Strava or Garmin Connect.
+- Recording: always on. Each session is written as you go to a CSV (timestamp, BPM, RR intervals, skin contact, calculated BPM) in a scratch folder. **Save recording** moves it to your recordings folder, optionally with a `.tcx` you can upload to Strava or Garmin Connect, and starts a new one. **Reset** throws it away and starts over. Closing the app asks whether to save. If the app crashes, the recording is recovered into the recordings folder on the next start.
+- Events from other programs: games and tools can report songs, rounds, sets or anything else by dropping small JSON files in a folder (see below). The **Events** tab and the graph show each one with your average, max and min heart rate, and they're saved with the recording.
 - Reconnects automatically if the strap drops out. Settings are saved as you change them.
 
 **Command line**
@@ -38,6 +39,39 @@ Run your game in **borderless/windowed** mode. Exclusive fullscreen draws over e
 - `--snapshot <folder>`: renders every screen to PNGs off-screen and exits (used for the screenshots above).
 
 Tested with a Coospo H808S. Any strap that speaks the standard Bluetooth LE Heart Rate profile should work (Polar, Garmin HRM-Dual, Wahoo TICKR, …).
+
+## Events from other programs
+
+Any program can tell the app what you're doing, so your heart rate can later be broken down by song, level, set or whatever else. The bundled use is StepMania/ITGmania with a Simply Love module that reports each song, its chart and difficulty, the result and pauses. Nothing in the format is specific to it.
+
+**Channel:** write one JSON object per `.json` file into a watched folder. The app checks about twice a second, reads files in **filename order**, and deletes each one once it's read. Watched folders:
+- `%AppData%\HeartRateMonitor\inbox` (always)
+- whatever is listed in Settings → *Events from other programs*. The defaults are `%AppData%\StepMania 5.1\Save\HeartRate\events` and `%AppData%\ITGmania\Save\HeartRate\events`.
+
+Name files so they sort in order, for example `<session-stamp>-<sequence number padded to 6 digits>.json`. Writing in place is fine: a file that doesn't parse yet is retried. One that still isn't valid after 10 seconds is moved into a `bad` subfolder and noted in the log. Other file types are ignored. The event's time is when the file was created, so write it when the thing happens.
+
+**Format:** only `kind` is required.
+
+```jsonc
+{
+  "v": 1,
+  "kind": "begin",               // "begin" | "end" | "mark"
+  "type": "song",                // what it is: "song", "course", "set", "round", "pause", … (default "event")
+  "id": "20261018-201500-000001",// pairs a begin with its end; marks and children point at it with "parent"
+  "parent": "…",                 // optional: id of the span this one is inside (a song in a course)
+  "label": "Acme Songo Wongo [Hard 7]", // what to show
+  "source": "simply-love",       // who sent it
+  "data": { … }                  // anything you like; stored as-is
+}
+```
+
+- `begin`/`end` mark out a span. An `end` is matched to the open span with the same `id`, or failing that the latest open one with the same `type` and `source`. A `begin` with no `end` is closed when the next span of the same type and source begins.
+- `end` with `data.result` (e.g. `"cleared"`, `"failed"`, `"quit"`) shows in the Result column. `data.late: true` means the time is unreliable: the span is ended at its last mark instead, or after `data.length_s` seconds if it has no marks.
+- `mark` is a single moment (a pause, a screen change). Give it a `parent` to attach it to a span.
+
+**Saved files** (next to the recording's CSV):
+- `HeartRate_<time>.events.jsonl`: every event exactly as received, one per line, plus `"received"`, the time the app gave it.
+- `HeartRate_<time>.spans.csv`: one row per span with start, end, duration, result, avg/min/max BPM, and title, artist, pack, difficulty and meter when the sender included them (`data.title` and the like, and `data.players[0]`), plus the full `data` as JSON.
 
 ## How it works
 
@@ -49,6 +83,7 @@ The strap broadcasts the standard Bluetooth LE Heart Rate service (`0x180D`). Th
 HeartRateMonitor/
   Sensors/      BLE strap connection, measurement parser, dummy data source
   Recording/    CSV + TCX session recorder
+  Events/       Event folder inbox, begin/end span pairing
   Controls/     Zone-colored graph, brush cache, converters
   Models/       Settings (JSON in %AppData%\HeartRateMonitor), zones, samples
   OverlayWindow.xaml   The always-on-top display
