@@ -110,8 +110,20 @@
 
                     <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
                         <UniformGrid DockPanel.Dock="Left" Rows="1">
-                            <Button Content="Save recording" Click="Save_Click"
-                                    ToolTip="Save the session so far to the recordings folder and keep recording into a new one" />
+                            <Button Click="Save_Click">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                        <Setter Property="Content" Value="Save recording" />
+                                        <Setter Property="ToolTip" Value="Save the recording to the recordings folder and stop recording" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRecording}" Value="False">
+                                                <Setter Property="Content" Value="Start recording" />
+                                                <Setter Property="ToolTip" Value="Start a new recording" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
                             <Button Content="Open folder" Click="OpenFolder_Click" />
                             <Button Content="Reset" Click="ResetSession_Click"
                                     ToolTip="Clear the graph and throw away the unsaved recording" />

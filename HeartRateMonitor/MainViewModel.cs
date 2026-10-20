@@ -316,20 +316,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SessionTimeText = Samples.Count == 0 ? "" : $"Time {Samples[^1].Time - Samples[0].Time:hh\\:mm\\:ss}";
     }
 
-    /// <summary>Clears the graph and stats and throws away the unsaved recording, starting a fresh one.</summary>
+    /// <summary>
+    /// Clears the graph and stats. If a recording is going, throws it away and starts a fresh one;
+    /// if not (it was saved), stays not recording.
+    /// </summary>
     public void ResetSession()
     {
+        bool wasRecording = IsRecording;
         Log.Info($"User: reset session ({_recorder?.SampleCount ?? 0} unsaved samples discarded)");
         Samples.Clear();
         Spans.Clear();
         UpdateStats();
         DiscardRecording();
         _savedText = "";
-        StartRecording();
+        if (wasRecording)
+            StartRecording();
+        else
+            RecordingText = "Not recording";
     }
 
     /// <summary>
-    /// The current session is always being recorded, into a scratch folder until it's saved.
+    /// A recording starts with the app (and on Reset), into a scratch folder until it's saved.
     /// Whatever's left there from a crash is moved into the recordings folder instead.
     /// </summary>
     private string ScratchFolder => Path.Combine(
@@ -340,9 +347,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>True when there's recorded data that would be lost if the app quit without saving.</summary>
     public bool HasUnsavedRecording => _recorder is { SampleCount: > 0 };
+    public bool IsRecording => _recorder is not null;
 
-    private void StartRecording()
+    /// <summary>Starts a new recording. Called on startup and Reset, and when the user starts one after saving.</summary>
+    public void StartRecording()
     {
+        if (_recorder is not null)
+            return;
         try
         {
             _recorder = new SessionRecorder(ScratchFolder);
@@ -353,24 +364,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _recorder = null;
             RecordingText = $"Not recording: {ex.Message}";
         }
-        OnPropertyChanged(nameof(HasUnsavedRecording));
+        OnRecorderChanged();
         Tick();
     }
 
-    /// <summary>Saves the recording so far into the recordings folder and starts a new one. Returns the files written.</summary>
-    public IReadOnlyList<string> SaveRecording(bool startNew = true)
+    private void OnRecorderChanged()
+    {
+        OnPropertyChanged(nameof(HasUnsavedRecording));
+        OnPropertyChanged(nameof(IsRecording));
+    }
+
+    /// <summary>
+    /// Saves the recording into the recordings folder and stops recording; a new one starts only when the
+    /// user asks (or on Reset / next launch). Returns the files written, or nothing if there was no data yet,
+    /// in which case it keeps recording.
+    /// </summary>
+    public IReadOnlyList<string> SaveRecording()
     {
         var recorder = _recorder;
-        if (recorder is null)
+        if (recorder is not { SampleCount: > 0 })
             return [];
         _recorder = null;
         try
         {
-            if (recorder.SampleCount == 0)
-            {
-                recorder.Discard();
-                return [];
-            }
             // Spans that overlap this recording; ones still going are written as "in progress".
             var saveTime = DateTime.Now;
             recorder.WriteSpans(Spans.Where(s => s.Start < saveTime && (s.End ?? DateTime.MaxValue) >= recorder.Start).ToList());
@@ -378,12 +394,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             var files = recorder.Save(Settings.RecordingFolder, Settings.WriteTcx);
             Log.Info($"Recording saved: {string.Join(", ", files.Select(Path.GetFileName))}");
             _savedText = $"saved {Path.GetFileName(files[0])}";
+            RecordingText = $"Not recording ({_savedText})";
             return files;
+        }
+        catch
+        {
+            RecordingText = "Not recording (save failed; the recording will be recovered next start)";
+            throw;
         }
         finally
         {
-            if (startNew)
-                StartRecording();
+            OnRecorderChanged();
         }
     }
 
@@ -399,7 +420,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Log.Error("Couldn't delete the unsaved recording", ex);
         }
         _recorder = null;
-        OnPropertyChanged(nameof(HasUnsavedRecording));
+        OnRecorderChanged();
     }
 
     /// <summary>Moves recordings left in the scratch folder by a crash into the recordings folder.</summary>

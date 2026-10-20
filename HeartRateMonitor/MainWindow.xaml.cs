@@ -44,6 +44,11 @@ public partial class MainWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (!_vm.IsRecording)
+        {
+            _vm.StartRecording();
+            return;
+        }
         try
         {
             if (_vm.SaveRecording().Count == 0)
@@ -174,7 +179,7 @@ public partial class MainWindow : Window
                 case MessageBoxResult.Yes:
                     try
                     {
-                        _vm.SaveRecording(startNew: false);
+                        _vm.SaveRecording();
                     }
                     catch (Exception ex)
                     {
