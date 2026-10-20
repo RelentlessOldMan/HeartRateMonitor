@@ -94,7 +94,7 @@ HeartRateMonitor/
 
 ## Contributing
 
-This is a personal tool, published as-is — **issues and pull requests aren't accepted** (PRs auto-close; issues are my own to-do list). Fork it and make it your own. 💓
+This is a personal tool, published as-is, and doesn't take issues or pull requests. Fork it and make it your own. 💓
 
 ## License
 
