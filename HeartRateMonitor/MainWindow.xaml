@@ -92,19 +92,7 @@
                         </StackPanel>
                         <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
                             <TextBlock Text="{Binding MainLead.ZoneName}" FontSize="18" />
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
-                                        Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Strap}">
-                                <TextBlock Text="Strap" Width="75" FontWeight="SemiBold" Foreground="#555"
-                                           Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
-                                <TextBlock Text="{Binding StrapStatsText}" Foreground="#555" />
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
-                                        Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Calculated}">
-                                <TextBlock Text="From beats" Width="75" FontWeight="SemiBold" Foreground="#555"
-                                           Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
-                                <TextBlock Text="{Binding CalculatedStatsText}" Foreground="#555" />
-                            </StackPanel>
-                            <TextBlock Text="{Binding SessionTimeText}" Foreground="#555" Margin="0,4,0,0" />
+                            <c:SessionStatsView DataContext="{Binding Live}" />
                         </StackPanel>
                     </DockPanel>
 
@@ -131,11 +119,7 @@
                         <TextBlock Text="{Binding RecordingText}" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" />
                     </DockPanel>
 
-                    <Border BorderBrush="#CCC" BorderThickness="1" Background="#1E1E1E" Margin="0,8,0,0">
-                        <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}" Spans="{Binding Spans}"
-                                          ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF"
-                                          Display="{Binding Settings.MainDisplay}" />
-                    </Border>
+                    <c:SessionGraphView DataContext="{Binding Live}" Margin="0,8,0,0" />
                 </DockPanel>
             </TabItem>
 
@@ -188,28 +172,37 @@
                 <DockPanel Margin="10">
                     <TextBlock DockPanel.Dock="Bottom" Foreground="#555" TextWrapping="Wrap" Margin="0,8,0,0"
                                Text="Songs and other events other programs (like StepMania with the Simply Love heart rate module) report while you play, with your heart rate during each. They're saved with the recording: a .events.jsonl file with everything received, and a .spans.csv summary to open in a spreadsheet." />
-                    <DataGrid ItemsSource="{Binding Spans}" AutoGenerateColumns="False" IsReadOnly="True"
-                              CanUserSortColumns="False" HeadersVisibility="Column" SelectionMode="Single"
-                              Background="White" BorderBrush="#CCCCCC" BorderThickness="1"
-                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E0E0E0">
-                        <DataGrid.ColumnHeaderStyle>
-                            <Style TargetType="DataGridColumnHeader">
-                                <Setter Property="Padding" Value="6,5" />
-                                <Setter Property="Background" Value="#F5F5F5" />
-                                <Setter Property="BorderBrush" Value="#E0E0E0" />
-                                <Setter Property="BorderThickness" Value="0,0,1,1" />
-                            </Style>
-                        </DataGrid.ColumnHeaderStyle>
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Start" Width="65" Binding="{Binding StartText}" />
-                            <DataGridTextColumn Header="What" Width="*" Binding="{Binding DisplayLabel}" />
-                            <DataGridTextColumn Header="Time" Width="55" Binding="{Binding DurationText}" />
-                            <DataGridTextColumn Header="Avg" Width="45" Binding="{Binding AvgBpm}" FontWeight="SemiBold" />
-                            <DataGridTextColumn Header="Max" Width="45" Binding="{Binding MaxBpm}" />
-                            <DataGridTextColumn Header="Min" Width="45" Binding="{Binding MinBpm}" />
-                            <DataGridTextColumn Header="Result" Width="80" Binding="{Binding Result}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <c:SpanGridView DataContext="{Binding Live}" />
+                </DockPanel>
+            </TabItem>
+
+            <!-- ================= Recordings ================= -->
+            <TabItem Header="Recordings">
+                <DockPanel Margin="10" DataContext="{Binding Viewer}">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Content="Open file…" Click="OpenRunFile_Click" Margin="6,0,0,0"
+                                ToolTip="Open a recording from another folder" />
+                        <ComboBox x:Name="RunsCombo" ItemsSource="{Binding Runs}" DropDownOpened="RunsCombo_DropDownOpened"
+                                  SelectionChanged="RunsCombo_SelectionChanged" ToolTip="Recordings in your recordings folder, newest first" />
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Foreground="#555" Margin="0,6,0,0" />
+                    <c:SessionStatsView DockPanel.Dock="Top" DataContext="{Binding Session}" />
+
+                    <c:SessionGraphView DockPanel.Dock="Top" DataContext="{Binding Session}" Height="220" Margin="0,8,0,0" />
+
+                    <DockPanel DockPanel.Dock="Top" Margin="0,8,0,8">
+                        <UniformGrid DockPanel.Dock="Left" Rows="1">
+                            <Button Content="Cut selection" Click="CutSelection_Click" IsEnabled="{Binding Session.HasSelection}"
+                                    ToolTip="Remove the selected time, and any song that began in it, from this recording" />
+                            <Button Content="Undo" Click="UndoCut_Click" IsEnabled="{Binding CanUndo}" />
+                            <Button Content="Save" Click="SaveRun_Click" IsEnabled="{Binding IsDirty}"
+                                    ToolTip="Save over the recording; the original is kept in a backup folder next to it" />
+                        </UniformGrid>
+                        <TextBlock Foreground="#555" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="11"
+                                   Text="Click a song, or drag across the graph, to select. Shift-click stretches the selection; drag past an edge to run to the start or end." />
+                    </DockPanel>
+
+                    <c:SpanGridView DataContext="{Binding Session}" />
                 </DockPanel>
             </TabItem>
 

@@ -1,9 +1,14 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using HeartRateMonitor.Models;
 
 namespace HeartRateMonitor.Events;
 
-/// <summary>A stretch of time between a "begin" event and its "end" (a song, a course, …), with heart rate stats for it.</summary>
+/// <summary>
+/// A stretch of time between a "begin" event and its "end" (a song, a course, …), with heart rate stats for it.
+/// Also the stream/break segments a song's begin lists, as its children (<see cref="SpanTracker.SegmentType"/>).
+/// </summary>
 public sealed class EventSpan : ObservableObject
 {
     private DateTime? _end;
@@ -19,6 +24,11 @@ public sealed class EventSpan : ObservableObject
     /// <summary>0 for top-level spans, 1 for spans inside them (songs in a course), …</summary>
     public int Depth { get; init; }
     public required AppEvent BeginEvent { get; init; }
+    /// <summary>What's written to the spans file's data column: the begin's data, or a segment's own object.</summary>
+    public JsonObject? Data { get; init; }
+    public bool IsSegment => Type == SpanTracker.SegmentType;
+    /// <summary>For a segment, what kind it is ("stream", "break", …).</summary>
+    public string? SegmentKind { get; init; }
     public AppEvent? EndEvent { get; private set; }
     /// <summary>Marks (pauses, …) that named this span as their parent.</summary>
     public List<AppEvent> Marks { get; } = [];
@@ -35,6 +45,9 @@ public sealed class EventSpan : ObservableObject
     public string StartText => Start.ToString("HH:mm:ss");
     public string DisplayLabel => new string(' ', Depth * 4) + Label;
     public string DurationText => (End ?? DateTime.Now) - Start is var d && d.TotalHours >= 1 ? d.ToString(@"h\:mm\:ss") : d.ToString(@"m\:ss");
+
+    /// <summary>Where the span ends on the graph: its end, or the latest sample while it's still going.</summary>
+    public DateTime EndOr(DateTime now) => End ?? (now > Start ? now : Start);
 
     public void Close(DateTime time, AppEvent? endEvent, string? result)
     {
@@ -84,9 +97,14 @@ public sealed class EventSpan : ObservableObject
 /// <summary>Pairs begin/end events into <see cref="EventSpan"/>s.</summary>
 public sealed class SpanTracker
 {
+    /// <summary>Type of the spans made from a begin's <c>data.segments</c>.</summary>
+    public const string SegmentType = "segment";
+
     private int _autoId;
 
-    public ObservableCollection<EventSpan> Spans { get; } = [];
+    public SpanTracker(ObservableCollection<EventSpan>? spans = null) => Spans = spans ?? [];
+
+    public ObservableCollection<EventSpan> Spans { get; }
 
     /// <summary>Applies an event. Returns the span it opened, closed or marked, if any.</summary>
     public EventSpan? Apply(AppEvent e)
@@ -99,7 +117,7 @@ public sealed class SpanTracker
                 // program alongside an open one, means the old one never got its end (game crashed, …).
                 foreach (var stale in Spans.Where(s => s.IsOpen &&
                              (s.Id == e.Id || (s.Type == e.Type && s.Source == e.Source && s.Parent == e.Parent))).ToList())
-                    stale.Close(e.Time, null, "no end received");
+                    Close(stale, e.Time, null, "no end received");
 
                 var parent = e.Parent is null ? null : Spans.LastOrDefault(s => s.Id == e.Parent);
                 var span = new EventSpan
@@ -112,6 +130,7 @@ public sealed class SpanTracker
                     Start = e.Time,
                     Depth = parent is null ? 0 : parent.Depth + 1,
                     BeginEvent = e,
+                    Data = e.Data,
                 };
                 // Children go right after their parent's last descendant, so the list reads as a tree.
                 int index = Spans.Count;
@@ -122,6 +141,8 @@ public sealed class SpanTracker
                         index++;
                 }
                 Spans.Insert(index, span);
+                foreach (var segment in Segments(span, e))
+                    Spans.Insert(++index, segment);
                 return span;
             }
             case EventKind.End:
@@ -132,19 +153,18 @@ public sealed class SpanTracker
                     return null;
                 // Ending a parent ends whatever is still open inside it.
                 foreach (var child in Spans.Where(s => s.IsOpen && s.Parent == span.Id).ToList())
-                    child.Close(e.Time, null, "no end received");
+                    Close(child, e.Time, null, "no end received");
                 string? result = e.Data?["result"]?.ToString();
                 var time = e.Time;
                 // "late": the sender only noticed the end afterwards (e.g. backed out of a song in a way the game
                 // didn't report), so its time is wrong. Best guess: the last pause, else the song's own length.
-                if (e.Data?["late"]?.GetValueKind() == System.Text.Json.JsonValueKind.True)
+                if (e.Data?["late"]?.GetValueKind() == JsonValueKind.True)
                 {
-                    var lengthS = span.BeginEvent.Data?["length_s"]?.GetValueKind() == System.Text.Json.JsonValueKind.Number
-                        ? span.BeginEvent.Data["length_s"]!.GetValue<double>() : (double?)null;
+                    var lengthS = Number(span.BeginEvent.Data?["length_s"]);
                     time = span.Marks.LastOrDefault()?.Time
                            ?? (lengthS is { } l && span.Start.AddSeconds(l) < time ? span.Start.AddSeconds(l) : time);
                 }
-                span.Close(time, e, result);
+                Close(span, time, e, result);
                 return span;
             }
             default:
@@ -159,7 +179,59 @@ public sealed class SpanTracker
     /// <summary>Closes anything still open, e.g. when a recording is saved.</summary>
     public void CloseAll(DateTime time)
     {
-        foreach (var span in Spans.Where(s => s.IsOpen))
-            span.Close(time, null, "recording ended");
+        foreach (var span in Spans.Where(s => s.IsOpen).ToList())
+            Close(span, time, null, "recording ended");
     }
+
+    /// <summary>Closes a span and cuts its segments to fit: a failed song never reaches its later streams.</summary>
+    private void Close(EventSpan span, DateTime time, AppEvent? endEvent, string? result)
+    {
+        span.Close(time, endEvent, result);
+        foreach (var segment in Spans.Where(s => s.IsSegment && s.Parent == span.Id).ToList())
+        {
+            if (segment.Start >= span.End)
+                Spans.Remove(segment);
+            else if (segment.End > span.End)
+                segment.Close(span.End!.Value, null, null);
+        }
+    }
+
+    /// <summary>
+    /// Spans for the begin's <c>data.segments</c>: <c>[{"kind":"stream"|"break", "start_s", "end_s", …}]</c>, in seconds of
+    /// music time, where the begin itself happened at <c>music_seconds</c> (0 if not given). They're known up front,
+    /// so they're made already closed.
+    /// </summary>
+    private static IEnumerable<EventSpan> Segments(EventSpan span, AppEvent e)
+    {
+        if (e.Data?["segments"] is not JsonArray list)
+            yield break;
+        double beginAt = Number(e.Json["music_seconds"]) ?? 0;
+        var counts = new Dictionary<string, int>();
+        int n = 0;
+        foreach (var item in list.OfType<JsonObject>())
+        {
+            if (Number(item["start_s"]) is not { } startS || Number(item["end_s"]) is not { } endS || endS <= startS)
+                continue;
+            string kind = (item["kind"] ?? item["type"])?.ToString() is { Length: > 0 } k ? k : SegmentType;
+            counts[kind] = counts.GetValueOrDefault(kind) + 1;
+            var segment = new EventSpan
+            {
+                Id = $"{span.Id}/{++n}",
+                Parent = span.Id,
+                Type = SegmentType,
+                Source = span.Source,
+                Label = $"{char.ToUpperInvariant(kind[0])}{kind[1..]} {counts[kind]}",
+                Start = span.Start.AddSeconds(Math.Max(startS - beginAt, 0)),
+                Depth = span.Depth + 1,
+                BeginEvent = e,
+                Data = item,
+                SegmentKind = kind,
+            };
+            segment.Close(span.Start.AddSeconds(endS - beginAt), null, null);
+            yield return segment;
+        }
+    }
+
+    internal static double? Number(JsonNode? node) =>
+        node is JsonValue v && v.GetValueKind() == JsonValueKind.Number ? v.GetValue<double>() : null;
 }

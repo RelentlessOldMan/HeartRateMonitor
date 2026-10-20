@@ -1,0 +1,13 @@
+<!-- The full-session graph for a Session (the live one or an opened recording), with songs shaded and a selectable time range. -->
+<UserControl x:Class="HeartRateMonitor.Controls.SessionGraphView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:HeartRateMonitor.Controls">
+    <Border BorderBrush="#CCC" BorderThickness="1" Background="#1E1E1E">
+        <c:HeartRateGraph Samples="{Binding Samples}" Zones="{Binding Settings.Zones}" Spans="{Binding Spans}"
+                          SelectionStart="{Binding SelectionStart}" SelectionEnd="{Binding SelectionEnd}" IsSelectable="True"
+                          ShowZoneBands="True" ShowLabels="True" UseZoneColors="False" DefaultColor="#FFFFFF"
+                          Display="{Binding Settings.MainDisplay}" Cursor="Cross"
+                          ToolTip="Click a song to select it, drag to select a stretch of time, Shift-click to stretch the selection" />
+    </Border>
+</UserControl>

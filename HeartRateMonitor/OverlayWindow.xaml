@@ -104,7 +104,7 @@
             </Viewbox>
 
             <c:HeartRateGraph x:Name="Graph" Grid.Row="1" Margin="0,4,0,0" LineThickness="2.5"
-                              Samples="{Binding Samples}"
+                              Samples="{Binding Live.Samples}"
                               Zones="{Binding Settings.Zones}"
                               WindowMinutes="{Binding Settings.OverlayGraphMinutes}"
                               DefaultColor="{Binding Settings.FixedColor}"

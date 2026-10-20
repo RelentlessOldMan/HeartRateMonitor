@@ -33,7 +33,7 @@ public static class Snapshot
             vm.OnEvent(Events.AppEvent.Parse(json, start.AddSeconds(second), out _)!);
         Send(30, """{"kind":"begin","type":"song","id":"s1","source":"simply-love","label":"Acme Songo Wongo [Hard 7]","data":{"title":"Acme Songo Wongo","players":[{"player":"P1","difficulty":"Hard","meter":7}]}}""");
         Send(140, """{"kind":"end","type":"song","id":"s1","source":"simply-love","data":{"result":"cleared"}}""");
-        Send(170, """{"kind":"begin","type":"song","id":"s2","source":"simply-love","label":"Stamina Thing [Challenge 12]"}""");
+        Send(170, """{"kind":"begin","type":"song","id":"s2","source":"simply-love","label":"Stamina Thing [Challenge 12]","data":{"segments":[{"kind":"break","start_s":-1,"end_s":10},{"kind":"stream","start_s":10,"end_s":40,"measures":16},{"kind":"break","start_s":40,"end_s":55},{"kind":"stream","start_s":55,"end_s":110,"measures":32},{"kind":"break","start_s":110,"end_s":118},{"kind":"stream","start_s":118,"end_s":160,"measures":24}]}}""");
         Send(300, """{"kind":"end","type":"song","id":"s2","source":"simply-love","data":{"result":"failed"}}""");
         Send(330, """{"kind":"begin","type":"course","id":"c1","source":"simply-love","label":"Some Course [Medium]"}""");
         Send(330, """{"kind":"begin","type":"song","id":"c1s1","parent":"c1","source":"simply-love","label":"First Course Song"}""");
@@ -49,6 +49,14 @@ public static class Snapshot
         main.Resources = new ResourceDictionary();
         mainContent.Resources = mainResources;
         mainContent.DataContext = vm;
+        // The Recordings tab, with that session saved and opened, and the stamina song picked.
+        var runFolder = Path.Combine(Path.GetTempPath(), "HeartRateMonitorSnapshot");
+        if (Directory.Exists(runFolder))
+            Directory.Delete(runFolder, recursive: true);
+        var files = Recording.SessionRecorder.Write(vm.Live, Path.Combine(runFolder, "scratch"), runFolder, start, "Snapshot run", writeTcx: false);
+        vm.Viewer.Open(files.First(f => f.EndsWith(".csv") && !f.EndsWith(".spans.csv")));
+        vm.Viewer.Session.SelectedSpan = vm.Viewer.Session.Spans.First(s => s.Id == "s2");
+
         var tabs = main.Tabs;
         for (int i = 0; i < tabs.Items.Count; i++)
         {

@@ -18,20 +18,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _clock;
     private IHeartRateSource? _source;
     private SessionRecorder? _recorder;
-    private readonly SpanTracker _spans = new();
     private EventInbox? _inbox;
     private DateTime _lastSampleTime = DateTime.MinValue;
 
     public AppSettings Settings { get; }
     public bool IsDummy { get; }
-    public ObservableCollection<HeartRateSample> Samples { get; } = [];
-    /// <summary>Songs, courses, … reported by other programs this session (see <see cref="EventInbox"/>).</summary>
-    public ObservableCollection<EventSpan> Spans => _spans.Spans;
+    /// <summary>This session: heart rate since start or Reset, and songs etc. other programs reported (see <see cref="EventInbox"/>).</summary>
+    public Session Live { get; }
+    /// <summary>The Recordings tab.</summary>
+    public RunViewer Viewer { get; }
 
     public MainViewModel(AppSettings settings, bool dummy)
     {
         Settings = settings;
         IsDummy = dummy;
+        Live = new Session(settings);
+        Viewer = new RunViewer(settings, Path.Combine(AppDataFolder, IsDummy ? "EditScratch-dummy" : "EditScratch"));
         Settings.PropertyChanged += OnSettingsChanged;
         Settings.Zones.CollectionChanged += OnZonesCollectionChanged;
         foreach (var zone in Settings.Zones)
@@ -69,12 +71,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
     public int? BatteryLevel { get => _batteryLevel; private set { if (SetField(ref _batteryLevel, value)) OnPropertyChanged(nameof(BatteryText)); } }
     public string BatteryText => BatteryLevel is { } b ? $"{b}%" : "–";
-
-    // --- Session stats (since app start or last reset) ---
-    private string _strapStatsText = "", _calculatedStatsText = "", _sessionTimeText = "";
-    public string StrapStatsText { get => _strapStatsText; private set => SetField(ref _strapStatsText, value); }
-    public string CalculatedStatsText { get => _calculatedStatsText; private set => SetField(ref _calculatedStatsText, value); }
-    public string SessionTimeText { get => _sessionTimeText; private set => SetField(ref _sessionTimeText, value); }
 
     // --- Today's time in each zone ---
     /// <summary>How often today's stats are written to disk while data is coming in (they're also saved on exit).</summary>
@@ -159,17 +155,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _lastSampleTime = DateTime.Now;
         sample = sample with { CalculatedBpm = _beatRate.Add(sample) };
-        Samples.Add(sample);
+        Live.AddSample(sample);
         _recorder?.Add(sample);
         _strapBpm = sample.Bpm;
         _calculatedBpm = sample.CalculatedBpm;
         IsStale = false;
         RefreshReadings();
-        UpdateStats();
         TrackDaily(sample);
-        foreach (var span in Spans)
-            if (span.IsOpen)
-                span.UpdateStats(Samples);
     }
 
     // --- Events from other programs ---
@@ -192,11 +184,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     internal void OnEvent(AppEvent e)
     {
         _recorder?.AddEvent(e);
-        var span = _spans.Apply(e);
-        // Closing a span can close others (its children, or a stale one), so refresh every span that just ended.
-        foreach (var s in Spans)
-            if (s == span || s.End >= e.Time)
-                s.UpdateStats(Samples);
+        Live.AddEvent(e);
     }
 
     private void Tick()
@@ -305,17 +293,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Calculated.Update(_calculatedBpm, IsStale, Settings);
     }
 
-    private void UpdateStats()
-    {
-        static string Summary(IReadOnlyCollection<int> bpms) => bpms.Count == 0
-            ? "No data yet"
-            : $"Avg {bpms.Average():0}   Min {bpms.Min()}   Max {bpms.Max()}";
-
-        StrapStatsText = Summary(Samples.Select(s => s.Bpm).ToList());
-        CalculatedStatsText = Summary(Samples.Where(s => s.CalculatedBpm is not null).Select(s => s.CalculatedBpm!.Value).ToList());
-        SessionTimeText = Samples.Count == 0 ? "" : $"Time {Samples[^1].Time - Samples[0].Time:hh\\:mm\\:ss}";
-    }
-
     /// <summary>
     /// Clears the graph and stats. If a recording is going, throws it away and starts a fresh one;
     /// if not (it was saved), stays not recording.
@@ -324,9 +301,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         bool wasRecording = IsRecording;
         Log.Info($"User: reset session ({_recorder?.SampleCount ?? 0} unsaved samples discarded)");
-        Samples.Clear();
-        Spans.Clear();
-        UpdateStats();
+        Live.Clear();
         DiscardRecording();
         _savedText = "";
         if (wasRecording)
@@ -339,9 +314,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// A recording starts with the app (and on Reset), into a scratch folder until it's saved.
     /// Whatever's left there from a crash is moved into the recordings folder instead.
     /// </summary>
-    private string ScratchFolder => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeartRateMonitor",
-        IsDummy ? "UnsavedRecording-dummy" : "UnsavedRecording");
+    private string ScratchFolder => Path.Combine(AppDataFolder, IsDummy ? "UnsavedRecording-dummy" : "UnsavedRecording");
+
+    private static string AppDataFolder => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeartRateMonitor");
 
     private string _savedText = "";
 
@@ -388,8 +364,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             // Spans that overlap this recording; ones still going are written as "in progress".
-            var saveTime = DateTime.Now;
-            recorder.WriteSpans(Spans.Where(s => s.Start < saveTime && (s.End ?? DateTime.MaxValue) >= recorder.Start).ToList());
+            recorder.WriteSpans(Live.SpansBetween(recorder.Start, DateTime.Now));
             // If this throws, the files stay in the scratch folder and are recovered on the next start.
             var files = recorder.Save(Settings.RecordingFolder, Settings.WriteTcx);
             Log.Info($"Recording saved: {string.Join(", ", files.Select(Path.GetFileName))}");

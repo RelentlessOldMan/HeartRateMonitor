@@ -1,13 +1,18 @@
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using HeartRateMonitor.Events;
 using HeartRateMonitor.Models;
 
 namespace HeartRateMonitor.Controls;
 
-/// <summary>Line graph of heart rate over time, colored by zone, with optional zone bands behind it.</summary>
+/// <summary>
+/// Line graph of heart rate over time, colored by zone, with optional zone bands behind it.
+/// With <see cref="IsSelectable"/>, a time range can be picked: drag across it, click a song (or segment) to pick
+/// that, Shift-click to stretch the selection; dragging past either edge runs to the start or end.
+/// </summary>
 public sealed class HeartRateGraph : FrameworkElement
 {
     /// <summary>Color of the calculated line when it's drawn next to the strap's, so the two can be told apart.</summary>
@@ -56,7 +61,22 @@ public sealed class HeartRateGraph : FrameworkElement
         nameof(Spans), typeof(IList<EventSpan>), typeof(HeartRateGraph),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnCollectionChanged));
 
-    /// <summary>Songs etc. to shade behind the line. Only the innermost ones are drawn (songs, not the course around them).</summary>
+    public static readonly DependencyProperty SelectionStartProperty = DependencyProperty.Register(
+        nameof(SelectionStart), typeof(DateTime?), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public static readonly DependencyProperty SelectionEndProperty = DependencyProperty.Register(
+        nameof(SelectionEnd), typeof(DateTime?), typeof(HeartRateGraph),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public static readonly DependencyProperty IsSelectableProperty = DependencyProperty.Register(
+        nameof(IsSelectable), typeof(bool), typeof(HeartRateGraph), new FrameworkPropertyMetadata(false));
+
+    public DateTime? SelectionStart { get => (DateTime?)GetValue(SelectionStartProperty); set => SetValue(SelectionStartProperty, value); }
+    public DateTime? SelectionEnd { get => (DateTime?)GetValue(SelectionEndProperty); set => SetValue(SelectionEndProperty, value); }
+    public bool IsSelectable { get => (bool)GetValue(IsSelectableProperty); set => SetValue(IsSelectableProperty, value); }
+
+    /// <summary>Songs etc. to shade behind the line. Only the innermost ones are drawn (songs, not the course around them), with their stream segments lighter.</summary>
     public IList<EventSpan>? Spans { get => (IList<EventSpan>?)GetValue(SpansProperty); set => SetValue(SpansProperty, value); }
     public IList<HeartRateSample>? Samples { get => (IList<HeartRateSample>?)GetValue(SamplesProperty); set => SetValue(SamplesProperty, value); }
     public IEnumerable<HeartRateZone>? Zones { get => (IEnumerable<HeartRateZone>?)GetValue(ZonesProperty); set => SetValue(ZonesProperty, value); }
@@ -87,6 +107,10 @@ public sealed class HeartRateGraph : FrameworkElement
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e) => InvalidateVisual();
 
+    // The time axis as last drawn, for turning mouse positions into times.
+    private DateTime _axisStart;
+    private double _axisTicks, _axisWidth;
+
     protected override void OnRender(DrawingContext dc)
     {
         double width = ActualWidth, height = ActualHeight;
@@ -110,6 +134,9 @@ public sealed class HeartRateGraph : FrameworkElement
                 end = start + TimeSpan.FromMinutes(1);
         }
         double spanTicks = (end - start).Ticks;
+        (_axisStart, _axisTicks, _axisWidth) = (start, spanTicks, width);
+        // Something to hit everywhere, so clicks between the bands still count.
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, width, height));
 
         int first = FirstIndexAtOrAfter(samples, start);
         if (first >= samples.Count)
@@ -162,17 +189,24 @@ public sealed class HeartRateGraph : FrameworkElement
         if (Spans is { Count: > 0 } spans)
         {
             var bandBrush = BrushCache.Get("#FFFFFF", alpha: 0x16);
+            var streamBrush = BrushCache.Get("#FFFFFF", alpha: 0x14);
             var edgePen = BrushCache.GetPen("#555555", 1);
             var textBrush = BrushCache.Get("#AAAAAA");
             double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-            var parents = spans.Select(s => s.Parent).Where(p => p is not null).ToHashSet();
+            var parents = spans.Where(s => !s.IsSegment).Select(s => s.Parent).Where(p => p is not null).ToHashSet();
             foreach (var span in spans)
             {
                 if (parents.Contains(span.Id))
                     continue;
-                double x0 = Math.Max(X(span.Start), 0), x1 = Math.Min(X(span.End ?? samples[^1].Time), width);
+                double x0 = Math.Max(X(span.Start), 0), x1 = Math.Min(X(span.EndOr(samples[^1].Time)), width);
                 if (x1 <= 0 || x0 >= width || x1 <= x0)
                     continue;
+                if (span.IsSegment)
+                {
+                    if (span.SegmentKind == "stream")
+                        dc.DrawRectangle(streamBrush, null, new Rect(x0, 0, x1 - x0, height));
+                    continue;
+                }
                 dc.DrawRectangle(bandBrush, null, new Rect(x0, 0, x1 - x0, height));
                 dc.DrawLine(edgePen, new Point(x0, 0), new Point(x0, height));
                 if (ShowLabels && x1 - x0 > 30)
@@ -241,6 +275,18 @@ public sealed class HeartRateGraph : FrameworkElement
             Flush();
         }
 
+        if (SelectionStart is { } selStart && SelectionEnd is { } selEnd && selEnd > selStart)
+        {
+            double x0 = Math.Max(X(selStart), -1), x1 = Math.Min(X(selEnd), width + 1);
+            if (x1 > x0)
+            {
+                var edge = BrushCache.GetPen("#66B2FF", 1);
+                dc.DrawRectangle(BrushCache.Get("#3399FF", alpha: 0x40), null, new Rect(x0, 0, x1 - x0, height));
+                dc.DrawLine(edge, new Point(x0, 0), new Point(x0, height));
+                dc.DrawLine(edge, new Point(x1, 0), new Point(x1, height));
+            }
+        }
+
         if (showStrap)
             DrawLine(StrapValue, ColorFor);
         if (showCalculated)
@@ -272,6 +318,77 @@ public sealed class HeartRateGraph : FrameworkElement
                 }
             }
         }
+    }
+
+    // --- Selecting ---
+
+    private Point? _pressedAt;
+    private bool _dragging;
+
+    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonDown(e);
+        if (!IsSelectable || Samples is not { Count: > 0 } || _axisTicks <= 0)
+            return;
+        _pressedAt = e.GetPosition(this);
+        _dragging = false;
+        CaptureMouse();
+        e.Handled = true;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (_pressedAt is not { } from || !IsMouseCaptured)
+            return;
+        var at = e.GetPosition(this);
+        if (!_dragging && Math.Abs(at.X - from.X) < 4)
+            return;
+        _dragging = true;
+        SetSelection(TimeAt(from.X), TimeAt(at.X));
+    }
+
+    protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseLeftButtonUp(e);
+        if (_pressedAt is null)
+            return;
+        _pressedAt = null;
+        ReleaseMouseCapture();
+        if (_dragging || Samples is not { Count: > 0 } samples)
+            return;
+
+        // A click: pick the smallest span under it; with Shift, stretch the selection to take it (or that moment) in.
+        var time = TimeAt(e.GetPosition(this).X);
+        var last = samples[^1].Time;
+        var span = Spans?.Where(s => s.Start <= time && s.EndOr(last) >= time).MinBy(s => s.EndOr(last) - s.Start);
+        var (from, to) = span is null ? (time, time) : (span.Start, span.EndOr(last));
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && SelectionStart is { } a && SelectionEnd is { } b)
+            SetSelection(a < from ? a : from, b > to ? b : to);
+        else if (span is not null)
+            SetSelection(from, to);
+        else
+            SetSelection(null, null);
+    }
+
+    private void SetSelection(DateTime? from, DateTime? to)
+    {
+        if (from > to)
+            (from, to) = (to, from);
+        SelectionStart = from;
+        SelectionEnd = to;
+    }
+
+    /// <summary>The time at a point across the graph, kept within the recording.</summary>
+    private DateTime TimeAt(double x)
+    {
+        var samples = Samples!;
+        if (x <= 0)
+            return samples[0].Time;
+        if (x >= _axisWidth)
+            return samples[^1].Time;
+        var time = _axisStart.AddTicks((long)(x / _axisWidth * _axisTicks));
+        return time < samples[0].Time ? samples[0].Time : time > samples[^1].Time ? samples[^1].Time : time;
     }
 
     private static int FirstIndexAtOrAfter(IList<HeartRateSample> samples, DateTime time)

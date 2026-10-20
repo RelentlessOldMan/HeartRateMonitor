@@ -32,6 +32,7 @@ Run your game in **borderless/windowed** mode. Exclusive fullscreen draws over e
 - Daily stats: time in each zone today, kept across restarts. Stored per BPM, so editing your zones re-sorts the whole day.
 - Recording: starts automatically when the app opens. It's written as you go to a CSV (timestamp, BPM, RR intervals, skin contact, calculated BPM) in a scratch folder. **Save recording** moves it to your recordings folder, optionally with a `.tcx` you can upload to Strava or Garmin Connect, and stops recording; **Start recording** begins a new one. **Reset** clears the graph and, if a recording is going, throws it away and starts a fresh one. Closing the app asks whether to save. If the app crashes, the recording is recovered into the recordings folder on the next start.
 - Events from other programs: games and tools can report songs, rounds, sets or anything else by dropping small JSON files in a folder (see below). The **Events** tab and the graph show each one with your average, max and min heart rate, and they're saved with the recording.
+- Recordings tab: open a saved recording and see it just like the live view: the same stats, graph and events list. Click a song (or a stream inside it) or drag across the graph to select a stretch of time, and the stats for it show up. **Cut selection** removes that time, plus any song that began inside it, so a false start can go. Times after a cut keep their real clock times; the graph shows a gap. **Undo** steps back. **Save** writes over the recording, and the first time a recording is edited its original files are copied to a `backup` folder next to it.
 - Reconnects automatically if the strap drops out. Settings are saved as you change them.
 
 **Command line**
@@ -68,6 +69,7 @@ Name files so they sort in order, for example `<session-stamp>-<sequence number 
 - `begin`/`end` mark out a span. An `end` is matched to the open span with the same `id`, or failing that the latest open one with the same `type` and `source`. A `begin` with no `end` is closed when the next span of the same type and source begins.
 - `end` with `data.result` (e.g. `"cleared"`, `"failed"`, `"quit"`) shows in the Result column. `data.late: true` means the time is unreliable: the span is ended at its last mark instead, or after `data.length_s` seconds if it has no marks.
 - `mark` is a single moment (a pause, a screen change). Give it a `parent` to attach it to a span.
+- A `begin` can list the parts of what it starts in `data.segments`: `[{"kind": "stream" | "break", "start_s": 12.5, "end_s": 40.1, "measures": 16}, …]`, in seconds of the song's own time, with the begin itself at `music_seconds` (top level, 0 if left out). Each becomes a child span (e.g. "Stream 2") with its own heart rate stats; streams are shaded lighter in the graph. Parts after a song ends early (a fail) are dropped.
 
 **Saved files** (next to the recording's CSV):
 - `HeartRate_<time>.events.jsonl`: every event exactly as received, one per line, plus `"received"`, the time the app gave it.
@@ -84,8 +86,10 @@ HeartRateMonitor/
   Sensors/      BLE strap connection, measurement parser, dummy data source
   Recording/    CSV + TCX session recorder
   Events/       Event folder inbox, begin/end span pairing
-  Controls/     Zone-colored graph, brush cache, converters
+  Controls/     Zone-colored graph, the stats/graph/events views shared by the live and Recordings tabs, converters
   Models/       Settings (JSON in %AppData%\HeartRateMonitor), zones, samples
+  Session.cs           Samples, events, spans and stats for one session (live or opened from a file)
+  RunViewer.cs         The Recordings tab: open, cut, undo, save with backup
   OverlayWindow.xaml   The always-on-top display
   MainWindow.xaml      Connection, overlay options, zones, recording
   Snapshot.cs          Off-screen rendering for --snapshot

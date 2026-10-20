@@ -1,0 +1,25 @@
+<!-- Strap / from-beats stats, time, and what's selected, for a Session (the live one or an opened recording). -->
+<UserControl x:Class="HeartRateMonitor.Controls.SessionStatsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:HeartRateMonitor.Controls">
+    <UserControl.Resources>
+        <c:HeartRateDisplayToVisibilityConverter x:Key="DisplayToVis" />
+    </UserControl.Resources>
+    <StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                    Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Strap}">
+            <TextBlock Text="Strap" Width="75" FontWeight="SemiBold" Foreground="#555"
+                       Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+            <TextBlock Text="{Binding StrapStatsText}" Foreground="#555" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                    Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Calculated}">
+            <TextBlock Text="From beats" Width="75" FontWeight="SemiBold" Foreground="#555"
+                       Visibility="{Binding Settings.MainDisplay, Converter={StaticResource DisplayToVis}, ConverterParameter=Both}" />
+            <TextBlock Text="{Binding CalculatedStatsText}" Foreground="#555" />
+        </StackPanel>
+        <TextBlock Text="{Binding TimeText}" Foreground="#555" Margin="0,4,0,0" />
+        <TextBlock Text="{Binding SelectionText}" Foreground="#1E6FD9" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
+    </StackPanel>
+</UserControl>

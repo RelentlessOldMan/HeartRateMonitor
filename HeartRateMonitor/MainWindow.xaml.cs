@@ -82,6 +82,105 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo(AppSettings.EventInboxFolder) { UseShellExecute = true });
     }
 
+    // --- Recordings tab ---
+
+    private bool _settingRunsCombo;
+
+    private void RunsCombo_DropDownOpened(object? sender, EventArgs e)
+    {
+        var current = RunsCombo.SelectedItem;
+        _settingRunsCombo = true;
+        _vm.Viewer.RefreshRuns();
+        RunsCombo.SelectedItem = _vm.Viewer.Runs.FirstOrDefault(r => current is RunFile c && r.CsvPath == c.CsvPath);
+        _settingRunsCombo = false;
+    }
+
+    private void RunsCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_settingRunsCombo || RunsCombo.SelectedItem is not RunFile run || run.CsvPath == _vm.Viewer.CsvPath)
+            return;
+        if (!OpenRun(run.CsvPath))
+        {
+            // Stayed on the open recording.
+            _settingRunsCombo = true;
+            RunsCombo.SelectedItem = e.RemovedItems.Count > 0 ? e.RemovedItems[0] : null;
+            _settingRunsCombo = false;
+        }
+    }
+
+    private void OpenRunFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Open recording",
+            Filter = "Heart rate recordings (*.csv)|*.csv",
+            InitialDirectory = _vm.Settings.RecordingFolder,
+        };
+        if (dialog.ShowDialog(this) != true || !OpenRun(dialog.FileName))
+            return;
+        _settingRunsCombo = true;
+        RunsCombo.SelectedItem = _vm.Viewer.Runs.FirstOrDefault(r => string.Equals(r.CsvPath, dialog.FileName, StringComparison.OrdinalIgnoreCase));
+        _settingRunsCombo = false;
+    }
+
+    /// <summary>Opens a recording in the viewer, first offering to save edits to the one open. False if the user backed out.</summary>
+    private bool OpenRun(string csvPath)
+    {
+        if (!ConfirmLeaveEdits())
+            return false;
+        try
+        {
+            _vm.Viewer.Open(csvPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Couldn't open recording {csvPath}", ex);
+            MessageBox.Show(this, $"Couldn't open {Path.GetFileName(csvPath)}: {ex.Message}", "Open recording",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+    }
+
+    /// <summary>If the open recording has unsaved edits, asks whether to save them. False means cancel.</summary>
+    private bool ConfirmLeaveEdits()
+    {
+        if (!_vm.Viewer.IsDirty)
+            return true;
+        switch (MessageBox.Show(this, $"Save your edits to {Path.GetFileName(_vm.Viewer.CsvPath)}?", "Recordings",
+                    MessageBoxButton.YesNoCancel, MessageBoxImage.Question))
+        {
+            case MessageBoxResult.Yes:
+                return SaveRun();
+            case MessageBoxResult.No:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void CutSelection_Click(object sender, RoutedEventArgs e) => _vm.Viewer.CutSelection();
+
+    private void UndoCut_Click(object sender, RoutedEventArgs e) => _vm.Viewer.Undo();
+
+    private void SaveRun_Click(object sender, RoutedEventArgs e) => SaveRun();
+
+    private bool SaveRun()
+    {
+        try
+        {
+            _vm.Viewer.Save();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Couldn't save edited recording {_vm.Viewer.CsvPath}", ex);
+            MessageBox.Show(this, $"Couldn't save the recording: {ex.Message}\n\nThe original is still in the backup folder next to it.",
+                "Save recording", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+    }
+
     // --- Overlay tab ---
 
     private void ResetOverlay_Click(object sender, RoutedEventArgs e)
@@ -171,6 +270,12 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (!ConfirmLeaveEdits())
+        {
+            e.Cancel = true;
+            base.OnClosing(e);
+            return;
+        }
         if (_vm.HasUnsavedRecording)
         {
             switch (MessageBox.Show(this, "Save this session's recording before quitting?", "Heart Rate Monitor",
