@@ -38,6 +38,15 @@ public sealed record AppEvent(DateTime Time, EventKind Kind, JsonObject Json)
             error = "not a JSON object";
             return null;
         }
+        try
+        {
+            _ = json.Count; // Duplicate keys only throw once the object is first read.
+        }
+        catch (ArgumentException)
+        {
+            error = "a key appears more than once";
+            return null;
+        }
         EventKind? kind = (json["kind"] as JsonValue)?.TryGetValue(out string? k) == true ? k.ToLowerInvariant() switch
         {
             "begin" => EventKind.Begin,

@@ -105,7 +105,14 @@ public sealed class EventInbox : IDisposable
         }
 
         Log.Info($"Event {e.Kind.ToString().ToLowerInvariant()} {e.Type} \"{e.Label}\" from {e.Source ?? "?"} ({Path.GetFileName(path)})");
-        EventReceived?.Invoke(e);
+        try
+        {
+            EventReceived?.Invoke(e);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Couldn't apply event from {Path.GetFileName(path)}", ex);
+        }
     }
 
     private static void MoveToBad(string path, string? error)

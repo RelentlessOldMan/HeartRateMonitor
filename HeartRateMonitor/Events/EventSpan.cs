@@ -234,6 +234,11 @@ public sealed class SpanTracker
         }
     }
 
+    /// <summary>A number of seconds, or null if missing or beyond a year either way (nothing a song needs).</summary>
     internal static double? Number(JsonNode? node) =>
-        node is JsonValue v && v.GetValueKind() == JsonValueKind.Number ? v.GetValue<double>() : null;
+        node is JsonValue v && v.GetValueKind() == JsonValueKind.Number && v.TryGetValue(out double d) && Math.Abs(d) <= MaxSeconds
+            ? d
+            : null;
+
+    private const double MaxSeconds = 365 * 24 * 3600;
 }

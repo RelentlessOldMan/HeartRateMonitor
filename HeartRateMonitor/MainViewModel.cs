@@ -107,6 +107,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _source?.Dispose();
         _strapBpm = _calculatedBpm = null;
         _beatRate.Reset();
+        _lastBeatTime = DateTime.MinValue; // A new strap may not send RR intervals.
         RefreshReadings();
         BatteryLevel = null;
 
@@ -294,7 +295,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void RefreshReadings()
     {
         // With no beats coming in the strap keeps sending its last number; the calculated one goes blank by itself.
-        Strap.Update(_strapBpm, IsStale, frozen: DateTime.Now - _lastBeatTime > StaleAfter, Settings);
+        // Only a strap that has sent RR intervals can be caught frozen; one that never has is taken at its word.
+        bool frozen = _lastBeatTime != DateTime.MinValue && DateTime.Now - _lastBeatTime > StaleAfter;
+        Strap.Update(_strapBpm, IsStale, frozen, Settings);
         Calculated.Update(_calculatedBpm, IsStale, frozen: false, Settings);
     }
 

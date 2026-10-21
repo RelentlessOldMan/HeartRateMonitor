@@ -201,7 +201,7 @@ public sealed class Session : ObservableObject
             ? "No data yet"
             : $"Avg {bpms.Average():0}   Min {bpms.Min()}   Max {bpms.Max()}";
 
-        StrapStatsText = Summary(Samples.Select(s => s.Bpm).ToList());
+        StrapStatsText = Summary(Samples.Where(s => s.Bpm > 0 && s.SensorContact != false).Select(s => s.Bpm).ToList());
         CalculatedStatsText = Summary(Samples.Where(s => s.CalculatedBpm is not null).Select(s => s.CalculatedBpm!.Value).ToList());
         TimeText = Samples.Count == 0 ? "" : $"Time {FormatTime(Samples[^1].Time - Samples[0].Time)}";
     }

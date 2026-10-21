@@ -17,6 +17,7 @@ public partial class OverlayWindow : Window
 {
     private readonly MainViewModel _vm;
     private readonly DispatcherTimer _heartbeat = new();
+    private TimeSpan _beatInterval;
     private readonly DispatcherTimer _topmostTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private IntPtr _hwnd;
 
@@ -30,7 +31,12 @@ public partial class OverlayWindow : Window
         InitializeComponent();
         EnsureOnScreen();
 
-        _heartbeat.Tick += (_, _) => Beat();
+        _heartbeat.Tick += (_, _) =>
+        {
+            Beat();
+            if (_heartbeat.Interval != _beatInterval)
+                _heartbeat.Interval = _beatInterval;
+        };
         // Some games push themselves above topmost windows; quietly put the overlay back on top.
         _topmostTimer.Tick += (_, _) => SetWindowPos(_hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
 
@@ -88,9 +94,13 @@ public partial class OverlayWindow : Window
             _heartbeat.Stop();
             return;
         }
-        _heartbeat.Interval = TimeSpan.FromMilliseconds(60000.0 / bpm);
+        // Setting Interval restarts a running timer, which at a changing BPM would keep it from ever ticking.
+        _beatInterval = TimeSpan.FromMilliseconds(60000.0 / bpm);
         if (!_heartbeat.IsEnabled)
+        {
+            _heartbeat.Interval = _beatInterval;
             _heartbeat.Start();
+        }
     }
 
     private void Beat()

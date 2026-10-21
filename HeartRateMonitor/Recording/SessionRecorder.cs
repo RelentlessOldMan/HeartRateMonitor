@@ -170,7 +170,8 @@ public sealed class SessionRecorder : IDisposable
         {
             foreach (var line in File.ReadLines(eventsPath))
             {
-                if (JsonNode.Parse(line) is not JsonObject json || json["received"]?.ToString() is not { } received)
+                // A crash can leave a half-written last line; skip it like the CSV skips its bad lines.
+                if (TryParse(line) is not JsonObject json || json["received"]?.ToString() is not { } received)
                     continue;
                 json.Remove("received");
                 if (AppEvent.Parse(json.ToJsonString(), Time(received), out _) is { } e)
@@ -178,6 +179,18 @@ public sealed class SessionRecorder : IDisposable
             }
         }
         return (start ?? File.GetCreationTime(csvPath), samples, events);
+
+        static JsonNode? TryParse(string line)
+        {
+            try
+            {
+                return JsonNode.Parse(line);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return null;
+            }
+        }
     }
 
     /// <summary>The CSV and every sidecar file named after it (.tcx, .events.jsonl, …).</summary>
@@ -200,19 +213,21 @@ public sealed class SessionRecorder : IDisposable
         static XElement Bpm(XNamespace ns, string name, int value) => new(ns + name, new XElement(ns + "Value", value));
 
         var end = _samples[^1].Time;
+        static bool Valid(HeartRateSample s) => s.Bpm > 0 && s.SensorContact != false;
+        var valid = _samples.Where(Valid).ToList();
         // Element order matters: TCX is validated against an XSD sequence.
         var lap = new XElement(ns + "Lap", new XAttribute("StartTime", Utc(_start)),
             new XElement(ns + "TotalTimeSeconds", ((end - _start).TotalSeconds).ToString("0.0", CultureInfo.InvariantCulture)),
             new XElement(ns + "DistanceMeters", 0),
             new XElement(ns + "Calories", 0),
-            Bpm(ns, "AverageHeartRateBpm", (int)Math.Round(_samples.Average(s => s.Bpm))),
-            Bpm(ns, "MaximumHeartRateBpm", _samples.Max(s => s.Bpm)),
+            valid.Count == 0 ? null : Bpm(ns, "AverageHeartRateBpm", (int)Math.Round(valid.Average(s => s.Bpm))),
+            valid.Count == 0 ? null : Bpm(ns, "MaximumHeartRateBpm", valid.Max(s => s.Bpm)),
             new XElement(ns + "Intensity", "Active"),
             new XElement(ns + "TriggerMethod", "Manual"),
             new XElement(ns + "Track",
                 _samples.Select(s => new XElement(ns + "Trackpoint",
                     new XElement(ns + "Time", Utc(s.Time)),
-                    Bpm(ns, "HeartRateBpm", s.Bpm)))));
+                    Valid(s) ? Bpm(ns, "HeartRateBpm", s.Bpm) : null))));
 
         var doc = new XDocument(new XDeclaration("1.0", "UTF-8", null),
             new XElement(ns + "TrainingCenterDatabase",

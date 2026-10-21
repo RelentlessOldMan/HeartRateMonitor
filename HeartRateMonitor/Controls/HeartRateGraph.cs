@@ -269,6 +269,7 @@ public sealed class HeartRateGraph : FrameworkElement
                 }
                 else if (point.X - lastX < 0.75 && i != samples.Count - 1)
                 {
+                    lastTime = sample.Time; // Still seen, so the next sample isn't mistaken for one after a dropout.
                     continue; // More samples than pixels: skip ones that would land on the same column.
                 }
 
