@@ -197,9 +197,9 @@ public sealed class SpanTracker
     }
 
     /// <summary>
-    /// Spans for the begin's <c>data.segments</c>: <c>[{"kind":"stream"|"break", "start_s", "end_s", …}]</c>, in seconds of
-    /// music time, where the begin itself happened at <c>music_seconds</c> (0 if not given). They're known up front,
-    /// so they're made already closed.
+    /// Spans for the begin's <c>data.segments</c>: <c>[{"kind":"stream"|"break"|"loop"|…, "start_s", "end_s", "label"?, …}]</c>,
+    /// in seconds of music time, where the begin itself happened at <c>music_seconds</c> (0 if not given). Named by their
+    /// label, or else by kind and count ("Stream 2"). They're known up front, so they're made already closed.
     /// </summary>
     private static IEnumerable<EventSpan> Segments(EventSpan span, AppEvent e)
     {
@@ -220,7 +220,9 @@ public sealed class SpanTracker
                 Parent = span.Id,
                 Type = SegmentType,
                 Source = span.Source,
-                Label = $"{char.ToUpperInvariant(kind[0])}{kind[1..]} {counts[kind]}",
+                Label = item["label"] is JsonValue label && label.GetValueKind() == JsonValueKind.String && label.GetValue<string>() is { Length: > 0 } text
+                    ? text
+                    : $"{char.ToUpperInvariant(kind[0])}{kind[1..]} {counts[kind]}",
                 Start = span.Start.AddSeconds(Math.Max(startS - beginAt, 0)),
                 Depth = span.Depth + 1,
                 BeginEvent = e,

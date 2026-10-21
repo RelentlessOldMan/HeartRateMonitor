@@ -190,6 +190,7 @@ public sealed class HeartRateGraph : FrameworkElement
         {
             var bandBrush = BrushCache.Get("#FFFFFF", alpha: 0x16);
             var streamBrush = BrushCache.Get("#FFFFFF", alpha: 0x14);
+            var dividerPen = BrushCache.GetPen("#3A3A3A", 1);
             var edgePen = BrushCache.GetPen("#555555", 1);
             var textBrush = BrushCache.Get("#AAAAAA");
             double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
@@ -203,8 +204,11 @@ public sealed class HeartRateGraph : FrameworkElement
                     continue;
                 if (span.IsSegment)
                 {
+                    // Streams stand out from breaks; back-to-back parts (loops, songs in a mashup, levels) get a divider.
                     if (span.SegmentKind == "stream")
                         dc.DrawRectangle(streamBrush, null, new Rect(x0, 0, x1 - x0, height));
+                    else if (span.SegmentKind != "break" && x0 > 0)
+                        dc.DrawLine(dividerPen, new Point(x0, 0), new Point(x0, height));
                     continue;
                 }
                 dc.DrawRectangle(bandBrush, null, new Rect(x0, 0, x1 - x0, height));
