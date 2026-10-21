@@ -62,7 +62,7 @@ public partial class OverlayWindow : Window
 
     private void OnReadingChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(BpmReading.Bpm))
+        if (e.PropertyName is nameof(BpmReading.Bpm) or nameof(BpmReading.IsFrozen))
             UpdateHeartbeat();
     }
 
@@ -79,11 +79,11 @@ public partial class OverlayWindow : Window
         }
     }
 
-    // --- Heart animation: one pulse per beat at the current BPM ---
+    // --- Heart animation: one pulse per beat at the current BPM, still while the number is frozen ---
 
     private void UpdateHeartbeat()
     {
-        if (_vm.OverlayLead.Bpm is not { } bpm || bpm <= 0)
+        if (_vm.OverlayLead.Bpm is not { } bpm || bpm <= 0 || _vm.OverlayLead.IsFrozen)
         {
             _heartbeat.Stop();
             return;

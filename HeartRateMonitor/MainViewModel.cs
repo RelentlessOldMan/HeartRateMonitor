@@ -20,6 +20,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private SessionRecorder? _recorder;
     private EventInbox? _inbox;
     private DateTime _lastSampleTime = DateTime.MinValue;
+    /// <summary>When the strap last sent a beat (an RR interval) while touching skin.</summary>
+    private DateTime _lastBeatTime = DateTime.MinValue;
 
     public AppSettings Settings { get; }
     public bool IsDummy { get; }
@@ -154,6 +156,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     internal void OnSample(HeartRateSample sample)
     {
         _lastSampleTime = DateTime.Now;
+        if (sample.SensorContact != false && sample.RrIntervalsMs.Count > 0)
+            _lastBeatTime = _lastSampleTime;
         sample = sample with { CalculatedBpm = _beatRate.Add(sample) };
         Live.AddSample(sample);
         _recorder?.Add(sample);
@@ -289,8 +293,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshReadings()
     {
-        Strap.Update(_strapBpm, IsStale, Settings);
-        Calculated.Update(_calculatedBpm, IsStale, Settings);
+        // With no beats coming in the strap keeps sending its last number; the calculated one goes blank by itself.
+        Strap.Update(_strapBpm, IsStale, frozen: DateTime.Now - _lastBeatTime > StaleAfter, Settings);
+        Calculated.Update(_calculatedBpm, IsStale, frozen: false, Settings);
     }
 
     /// <summary>
